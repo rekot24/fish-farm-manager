@@ -1,0 +1,27 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Personal device data — do not commit serials or captured images
+config/devices.json
+assets/devices/
+
+# Personal settings — contains private server link
+config/settings.json
+
+# Debug output
+debug_shots/
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Stray folders from build
+{bot,capture,detection,config/

@@ -1,0 +1,28 @@
+profile_name: support_public
+role: support
+server_type: public
+status: stub   # Phase 3 — not yet implemented
+
+behaviors:
+  auto_farm_reset:
+    enabled: true
+    interval_min: 15
+
+  end_run_reset:
+    enabled: true
+    interval_min: 10
+
+  eaten_by_detection:
+    enabled: false
+
+  rejoin_on_kick: true
+  auto_rejoin: true
+
+detectors_required:
+  - auto_button_on
+  - auto_button_off
+  - end_run_button
+  - death_screen
+  - in_run_indicator
+  - lobby_screen
+  - roblox_home_screen

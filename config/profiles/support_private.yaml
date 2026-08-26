@@ -1,0 +1,32 @@
+profile_name: support_private
+role: support
+server_type: private
+
+behaviors:
+  auto_farm_reset:
+    enabled: true
+    interval_min: 15
+
+  end_run_reset:
+    enabled: true
+    interval_min: 10
+
+  cascade_reset_on_lead_reset:
+    enabled: true
+    delay_after_lead_s: 30
+
+  eaten_by_detection:
+    enabled: false    # support devices do not act on eaten-by detection
+
+  rejoin_on_kick: true
+  rejoin_source: global_settings   # reads private_server_link from settings.json
+  auto_rejoin: true                # no signal needed, rejoin immediately on kick/crash
+
+detectors_required:
+  - auto_button_on
+  - auto_button_off
+  - end_run_button
+  - death_screen
+  - in_run_indicator
+  - lobby_screen
+  - roblox_home_screen
