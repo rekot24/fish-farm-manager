@@ -4,7 +4,7 @@ ui/app.py
 Main Tkinter application window.
 
 Layout:
-  - Top bar: Start All / Stop All / Settings buttons
+  - Top bar: Start All / Stop All / Add Devices / Settings buttons
   - Device list: scrollable panel of DevicePanel rows
   - Log panel: scrolled text with filter
 
@@ -77,9 +77,14 @@ class App:
         ttk.Label(top, text="Be Fish Farm Manager",
                   font=("TkDefaultFont", 12, "bold")).pack(side="left")
 
-        ttk.Button(top, text="Settings", command=self._open_settings).pack(side="right", padx=(4, 0))
-        ttk.Button(top, text="Stop All", command=self._stop_all).pack(side="right", padx=(4, 0))
-        ttk.Button(top, text="Start All", command=self._start_all).pack(side="right", padx=(4, 0))
+        ttk.Button(top, text="Settings",
+                   command=self._open_settings).pack(side="right", padx=(4, 0))
+        ttk.Button(top, text="Stop All",
+                   command=self._stop_all).pack(side="right", padx=(4, 0))
+        ttk.Button(top, text="Start All",
+                   command=self._start_all).pack(side="right", padx=(4, 0))
+        ttk.Button(top, text="+ Add Devices",
+                   command=self._add_devices).pack(side="right", padx=(4, 12))
 
         # ---- Device list ----
         device_frame = ttk.LabelFrame(self.root, text="Devices", padding=(8, 6))
@@ -89,7 +94,8 @@ class App:
 
         # Scrollable canvas for device panels
         self._canvas = tk.Canvas(device_frame, highlightthickness=0)
-        scrollbar = ttk.Scrollbar(device_frame, orient="vertical", command=self._canvas.yview)
+        scrollbar = ttk.Scrollbar(device_frame, orient="vertical",
+                                   command=self._canvas.yview)
         self._canvas.configure(yscrollcommand=scrollbar.set)
 
         scrollbar.grid(row=0, column=1, sticky="ns")
@@ -101,6 +107,14 @@ class App:
         )
         self._device_container.bind("<Configure>", self._on_frame_configure)
         self._canvas.bind("<Configure>", self._on_canvas_configure)
+
+        # Placeholder shown when no devices are configured
+        self._lbl_no_devices = ttk.Label(
+            self._device_container,
+            text='No devices configured. Click "+ Add Devices" to scan for connected devices.',
+            foreground="#888888",
+            padding=(12, 20),
+        )
 
         # ---- Log panel ----
         log_frame = ttk.LabelFrame(self.root, text="Log", padding=(8, 6))
@@ -116,18 +130,29 @@ class App:
         filter_frame.grid(row=1, column=0, sticky="w", pady=(4, 0))
         ttk.Label(filter_frame, text="Filter:").pack(side="left")
         self._log_filter = tk.StringVar()
-        ttk.Entry(filter_frame, textvariable=self._log_filter, width=20).pack(side="left", padx=(4, 0))
+        ttk.Entry(filter_frame, textvariable=self._log_filter,
+                  width=20).pack(side="left", padx=(4, 0))
         ttk.Button(filter_frame, text="Clear Log",
-                   command=self._clear_log).grid(row=1, column=2, sticky="e", padx=(8, 0))
+                   command=self._clear_log).pack(side="left", padx=(8, 0))
 
     def _rebuild_device_panels(self) -> None:
         """Rebuild the device panel list from current device configs."""
-        # Clear existing panels
         for widget in self._device_container.winfo_children():
             widget.destroy()
         self._device_panels.clear()
 
         statuses = self.manager.get_all_statuses()
+
+        if not statuses:
+            self._lbl_no_devices = ttk.Label(
+                self._device_container,
+                text='No devices configured. Click "+ Add Devices" to scan for connected devices.',
+                foreground="#888888",
+                padding=(12, 20),
+            )
+            self._lbl_no_devices.pack(anchor="w")
+            return
+
         for i, status in enumerate(statuses):
             serial = status["serial"]
             panel = DevicePanel(
@@ -208,6 +233,23 @@ class App:
         self.log("[UI] Stopping all devices...")
         self.manager.stop_all()
 
+    def _add_devices(self) -> None:
+        """Open the Add Devices dialog to scan and add new ADB devices."""
+        from ui.add_device_dialog import AddDeviceDialog
+        settings = load_settings()
+        dialog = AddDeviceDialog(self.root, adb_path=settings.adb_path)
+        self.root.wait_window(dialog.top)
+
+        if dialog.saved and dialog.added:
+            # Reload configs and update the manager
+            new_devices = load_devices()
+            self.manager.reload_device_configs(new_devices)
+            self._rebuild_device_panels()
+            names = ", ".join(d.nickname or d.serial[:12] for d in dialog.added)
+            self.log(f"[UI] Added {len(dialog.added)} device(s): {names}")
+        elif dialog.saved:
+            self.log("[UI] No devices were added.")
+
     def _toggle_device(self, serial: str) -> None:
         """Start or stop a single device worker."""
         worker = self.manager._workers.get(serial)
@@ -246,10 +288,10 @@ class App:
         dialog = DeviceSettingsDialog(self.root, dev_cfg, all_devices=devices)
         self.root.wait_window(dialog.top)
         if dialog.saved:
-            # Update the device in the list and save
             updated = [dialog.result if d.serial == serial else d for d in devices]
             save_devices(updated)
             self.manager.reload_device_configs(updated)
+            self._rebuild_device_panels()
             self.log(f"[UI] Device settings saved for {dev_cfg.nickname or serial}")
 
     # ------------------------------------------------------------------

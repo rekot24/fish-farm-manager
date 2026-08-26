@@ -22,6 +22,3 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
-
-# Stray folders from build
-{bot,capture,detection,config/
