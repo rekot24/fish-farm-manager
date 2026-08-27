@@ -16,6 +16,7 @@ import tkinter as tk
 
 from bot.config_manager import load_settings, load_devices, validate_settings, validate_devices
 from bot.device_manager import DeviceManager
+from bot.tool_paths import resolve_adb_path
 from ui.app import App
 
 
@@ -23,6 +24,9 @@ def main():
     # ---- Load configuration ----
     try:
         settings = load_settings()
+        # Resolve "adb", "auto", stale copied paths, or relative paths against
+        # the repository-local Android Platform Tools installation first.
+        settings.adb_path = resolve_adb_path(settings.adb_path)
         devices = load_devices()
     except Exception as e:
         print(f"[FATAL] Failed to load configuration: {e}")
