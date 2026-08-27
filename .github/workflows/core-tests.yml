@@ -1,0 +1,23 @@
+name: Core Tests
+
+on:
+  push:
+    branches:
+      - main
+      - code-review-fixes-2026-08-27
+  pull_request:
+
+jobs:
+  core-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run core regression tests
+        run: python -m unittest discover -s tests -v
