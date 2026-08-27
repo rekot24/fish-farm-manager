@@ -113,12 +113,12 @@ class App:
         self._log_text.grid(row=0, column=0, columnspan=3, sticky="ew")
 
         filter_frame = ttk.Frame(log_frame)
-        filter_frame.grid(row=1, column=0, sticky="w", pady=(4, 0))
+        filter_frame.grid(row=1, column=0, sticky="ew", pady=(4, 0))
         ttk.Label(filter_frame, text="Filter:").pack(side="left")
         self._log_filter = tk.StringVar()
         ttk.Entry(filter_frame, textvariable=self._log_filter, width=20).pack(side="left", padx=(4, 0))
         ttk.Button(filter_frame, text="Clear Log",
-                   command=self._clear_log).grid(row=1, column=2, sticky="e", padx=(8, 0))
+                   command=self._clear_log).pack(side="right", padx=(8, 0))
 
     def _rebuild_device_panels(self) -> None:
         """Rebuild the device panel list from current device configs."""
