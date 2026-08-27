@@ -13,14 +13,14 @@ Rules are evaluated in descending priority order.
 The first matching rule wins.
 If no rule matches, STATE_UNKNOWN is returned.
 
-Add new states here as more of the UI is reverse-engineered.
+Important: do not add a catch-all LOADING rule with an empty require_all list.
+That would prevent STATE_UNKNOWN from ever being reached and would disable the
+worker's UNKNOWN timeout/crash-recovery path. Add LOADING only when there is an
+affirmative detector that proves a loading screen is visible.
 """
 
 from typing import Dict, List
 
-# ---------------------------------------------------------------------------
-# Private mode rules (shared between lead_private and support_private)
-# ---------------------------------------------------------------------------
 
 _PRIVATE_RULES: List[Dict] = [
     {
@@ -41,20 +41,8 @@ _PRIVATE_RULES: List[Dict] = [
         "require_none": ["in_run_indicator", "death_screen"],
         "priority": 60,
     },
-    {
-        "state": "LOADING",
-        "require_all": [],
-        "require_none": ["in_run_indicator", "death_screen", "lobby_screen"],
-        "priority": 10,
-        # Low priority catch-all for when nothing else matches but
-        # we know we're somewhere in the game (not crashed).
-        # The worker uses UNKNOWN + timeout to detect actual crashes.
-    },
 ]
 
-# ---------------------------------------------------------------------------
-# Public mode rules (stub — same structure, expand in Phase 3)
-# ---------------------------------------------------------------------------
 
 _PUBLIC_RULES: List[Dict] = [
     {
@@ -77,13 +65,10 @@ _PUBLIC_RULES: List[Dict] = [
     },
 ]
 
-# ---------------------------------------------------------------------------
-# Rule registry by profile name
-# ---------------------------------------------------------------------------
 
 STATE_RULES: Dict[str, List[Dict]] = {
-    "lead_private":    _PRIVATE_RULES,
+    "lead_private": _PRIVATE_RULES,
     "support_private": _PRIVATE_RULES,
-    "lead_public":     _PUBLIC_RULES,
-    "support_public":  _PUBLIC_RULES,
+    "lead_public": _PUBLIC_RULES,
+    "support_public": _PUBLIC_RULES,
 }
