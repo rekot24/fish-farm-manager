@@ -12,6 +12,9 @@ assets/devices/
 # Personal settings — contains private server link
 config/settings.json
 
+# Bootstrapped external tools — downloaded per machine/OS
+vendor/android/platform-tools/
+
 # Debug output
 debug_shots/
 
