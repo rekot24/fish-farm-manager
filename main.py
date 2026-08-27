@@ -62,7 +62,7 @@ def main():
         app.log(msg)
 
     # Start all enabled device workers
-    manager.start_all()
+    # manager.start_all()
 
     root.mainloop()
 

@@ -273,7 +273,7 @@ class ScrcpySocketBackend(CaptureBackend):
                 f"CLASSPATH={self._DEVICE_SERVER_PATH}",
                 "app_process", "/",
                 "com.genymobile.scrcpy.Server",
-                "2.1",                          # version string (matches jar)
+                "4.1",                          # version string (matches jar)
                 "tunnel_forward=true",
                 f"video_bit_rate={self.bit_rate}",
                 f"max_size={self.max_size}",

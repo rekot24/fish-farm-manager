@@ -165,6 +165,18 @@ class App:
             panel.grid(row=i, column=0, sticky="ew", pady=(0, 2))
             self._device_container.columnconfigure(0, weight=1)
             self._device_panels[serial] = panel
+            self.root.after(100, self._resize_to_fit)
+
+    def _resize_to_fit(self) -> None:
+        """Resize window to fit current number of devices, capped at 10."""
+        device_count = len(self._device_panels)
+        capped = min(device_count, 10)
+        panel_height = capped * 78
+        log_height = 220
+        top_height = 60
+        total = panel_height + log_height + top_height
+        print(f"[resize] devices={device_count} total_height={total}")
+        self.root.geometry(f"820x{total}")
 
     # ------------------------------------------------------------------
     # Polling
