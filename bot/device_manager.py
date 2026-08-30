@@ -99,10 +99,11 @@ class DeviceManager:
             self._start_worker(dev_cfg)
 
     def stop_all(self) -> None:
-        """Stop all running workers."""
+        """Stop all running workers and clean up the event bus."""
         for serial, worker in list(self._workers.items()):
             self._log(f"[DeviceManager] Stopping worker for {serial}")
             worker.stop()
+            self.event_bus.unregister(serial)
         self._workers.clear()
 
     def start_device(self, serial: str) -> bool:
@@ -114,16 +115,29 @@ class DeviceManager:
         return self._start_worker(dev_cfg)
 
     def stop_device(self, serial: str) -> None:
-        """Stop a single device worker by serial."""
+        """Stop a single device worker by serial and clean up the event bus."""
         worker = self._workers.pop(serial, None)
         if worker:
             worker.stop()
+            self.event_bus.unregister(serial)
 
     def _start_worker(self, dev_cfg: DeviceConfig) -> bool:
         """Internal: load profile, register with event bus, start worker."""
-        if dev_cfg.serial in self._workers:
-            self._log(f"[DeviceManager] Worker already running for {dev_cfg.serial}")
-            return False
+
+        # F-04 fix: check if thread is actually alive, not just if the object exists.
+        # A worker whose thread exited early (e.g. capture failure) stays in _workers
+        # but is_running() returns False — prune it so we can restart cleanly.
+        existing = self._workers.get(dev_cfg.serial)
+        if existing is not None:
+            if existing.is_running():
+                self._log(f"[DeviceManager] Worker already running for {dev_cfg.serial}")
+                return False
+            else:
+                # Stale worker — clean it up before spawning a new one
+                self._log(f"[DeviceManager] Pruning stale worker for {dev_cfg.serial}")
+                existing.stop()
+                self.event_bus.unregister(dev_cfg.serial)
+                del self._workers[dev_cfg.serial]
 
         # Load the profile
         try:
@@ -134,12 +148,12 @@ class DeviceManager:
 
         if profile_cfg.status == "stub":
             self._log(
-                f"[DeviceManager] Profile '{dev_cfg.profile}' is a stub (Phase 1). "
+                f"[DeviceManager] Profile '{dev_cfg.profile}' is a stub. "
                 f"Skipping {dev_cfg.nickname or dev_cfg.serial}."
             )
             return False
 
-        # Register with event bus
+        # Register fresh queue with event bus
         self.event_bus.register(dev_cfg.serial)
 
         # Create and start worker
@@ -169,7 +183,8 @@ class DeviceManager:
         statuses = []
         for dev_cfg in self.device_cfgs:
             worker = self._workers.get(dev_cfg.serial)
-            if worker:
+            # Use is_running() rather than presence in dict — F-04 fix
+            if worker and worker.is_running():
                 health = worker.get_health()
                 statuses.append({
                     "serial": dev_cfg.serial,
@@ -182,6 +197,7 @@ class DeviceManager:
                     "temp": health.temperature_celsius,
                     "worker_state": health.worker_state,
                     "adb_connected": health.adb_connected,
+                    "revives_remaining": worker.revives_remaining,
                 })
             else:
                 statuses.append({
@@ -195,13 +211,14 @@ class DeviceManager:
                     "temp": -1.0,
                     "worker_state": "STOPPED",
                     "adb_connected": False,
+                    "revives_remaining": dev_cfg.revive_count,
                 })
         return statuses
 
     def get_timer_info(self, serial: str) -> Optional[dict]:
         """Return timer countdown info for a device (for UI display)."""
         worker = self._workers.get(serial)
-        if not worker:
+        if not worker or not worker.is_running():
             return None
 
         import time
@@ -213,7 +230,9 @@ class DeviceManager:
 
         return {
             "auto_reset_remaining_s": auto_remaining,
+            "auto_reset_enabled": worker.cfg.timers.auto_farm_reset_enabled,
             "end_run_remaining_s": end_remaining,
+            "end_run_enabled": worker.cfg.timers.end_run_reset_enabled,
         }
 
     # ------------------------------------------------------------------
@@ -223,10 +242,9 @@ class DeviceManager:
     def reload_device_configs(self, new_cfgs: List[DeviceConfig]) -> None:
         """
         Update device configs at runtime (after the GUI saves changes).
-        Workers pick up timer changes on their next loop iteration.
+        Workers pick up timer/config changes on their next loop iteration.
         """
         self.device_cfgs = new_cfgs
-        # Push updated cfg to running workers
         for cfg in new_cfgs:
             worker = self._workers.get(cfg.serial)
             if worker:

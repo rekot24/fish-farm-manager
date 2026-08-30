@@ -3,8 +3,8 @@ bot/farm_event_bus.py
 
 FarmEventBus — thread-safe inter-device signaling.
 
-The lead device posts events (cascade_reset, force_end_run) that support
-device workers read at the top of their next loop iteration.
+The lead device posts events that support device workers read at the top
+of their next loop iteration.
 
 Design:
   - One queue per device serial
@@ -14,11 +14,12 @@ Design:
 
 Thread safety:
   - queue.Queue is thread-safe for put/get
-  - Device registration (add_device) should happen before workers start
+  - Registration should happen before workers start
 
 Event types:
   cascade_reset   : lead finished an end-run, support should reset soon
   force_end_run   : support device ate the lead, end run immediately
+  move_to_private : lead's revives are exhausted, everyone move to private
 """
 
 from __future__ import annotations
@@ -31,8 +32,9 @@ from typing import Dict, List, Optional
 # Event type constants
 # ---------------------------------------------------------------------------
 
-EVENT_CASCADE_RESET = "cascade_reset"
-EVENT_FORCE_END_RUN = "force_end_run"
+EVENT_CASCADE_RESET   = "cascade_reset"
+EVENT_FORCE_END_RUN   = "force_end_run"
+EVENT_MOVE_TO_PRIVATE = "move_to_private"
 
 
 class FarmEventBus:
@@ -55,7 +57,10 @@ class FarmEventBus:
             self._queues[serial] = queue.Queue()
 
     def unregister(self, serial: str) -> None:
-        """Remove a device from the bus (called when device disconnects)."""
+        """
+        Remove a device from the bus.
+        Called when a worker stops so stale events don't survive a restart.
+        """
         self._queues.pop(serial, None)
 
     def post(self, target_serial: str, event: dict) -> None:
@@ -71,22 +76,13 @@ class FarmEventBus:
         """
         Post an event to all registered devices except the excluded one.
         Typically called by the lead to signal all support devices.
-
-        Args:
-            event          : the event dict to broadcast
-            exclude_serial : serial to skip (usually the lead's own serial)
         """
         for serial, q in self._queues.items():
             if serial != exclude_serial:
                 q.put(event)
 
     def poll(self, serial: str) -> Optional[dict]:
-        """
-        Non-blocking poll for the next event for a device.
-        Returns the event dict, or None if the queue is empty.
-
-        Called at the top of each worker loop iteration.
-        """
+        """Non-blocking poll for the next event. Returns None if empty."""
         q = self._queues.get(serial)
         if q is None:
             return None
@@ -96,14 +92,10 @@ class FarmEventBus:
             return None
 
     def poll_all(self, serial: str) -> List[dict]:
-        """
-        Drain all pending events for a device in one call.
-        Useful if multiple events may have queued up between loop iterations.
-        """
+        """Drain all pending events for a device in one call."""
         q = self._queues.get(serial)
         if q is None:
             return []
-
         events = []
         while True:
             try:

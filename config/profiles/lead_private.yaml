@@ -1,6 +1,7 @@
 profile_name: lead_private
 role: lead
 server_type: private
+status: active
 
 behaviors:
   auto_farm_reset:

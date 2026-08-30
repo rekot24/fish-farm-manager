@@ -11,9 +11,10 @@ Rule format:
 
 Rules are evaluated in descending priority order.
 The first matching rule wins.
-If no rule matches, STATE_UNKNOWN is returned.
+If no rule matches, STATE_UNKNOWN is returned by the state machine.
 
-Add new states here as more of the UI is reverse-engineered.
+UNKNOWN is the correct fallback — do not add catch-all rules with empty
+require_all, as they prevent the crash-recovery timeout from triggering.
 """
 
 from typing import Dict, List
@@ -41,19 +42,12 @@ _PRIVATE_RULES: List[Dict] = [
         "require_none": ["in_run_indicator", "death_screen"],
         "priority": 60,
     },
-    {
-        "state": "LOADING",
-        "require_all": [],
-        "require_none": ["in_run_indicator", "death_screen", "lobby_screen"],
-        "priority": 10,
-        # Low priority catch-all for when nothing else matches but
-        # we know we're somewhere in the game (not crashed).
-        # The worker uses UNKNOWN + timeout to detect actual crashes.
-    },
+    # No catch-all rule — unmatched states fall through to STATE_UNKNOWN,
+    # which allows the 60-second crash-recovery timeout to trigger.
 ]
 
 # ---------------------------------------------------------------------------
-# Public mode rules (stub — same structure, expand in Phase 3)
+# Public mode rules (shared between lead_public and support_public)
 # ---------------------------------------------------------------------------
 
 _PUBLIC_RULES: List[Dict] = [

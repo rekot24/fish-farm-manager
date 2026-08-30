@@ -86,7 +86,7 @@ class DetectorConfig:
     """
     Config for one detector on one device.
 
-    image      : path to the template image (shared or device-specific)
+    image       : path to the template image (shared or device-specific)
     click_offset: (dx, dy) pixels from detected image center to tap target.
                   [0, 0] means tap dead center of the detected image.
     """
@@ -96,7 +96,12 @@ class DetectorConfig:
 
 @dataclass
 class TimerConfig:
+    # Auto-farm reset: double-taps the auto button to reset the server kick timer
+    auto_farm_reset_enabled: bool = True
     auto_farm_reset_interval_min: int = 15
+
+    # End-run reset: clicks the end-run button on a timer to keep fish size small
+    end_run_reset_enabled: bool = True
     end_run_reset_interval_min: int = 10
 
 
@@ -114,6 +119,11 @@ class DeviceConfig:
     timers: TimerConfig = field(default_factory=TimerConfig)
     eaten_by_name_image: str = ""
     device_image_overrides: List[str] = field(default_factory=list)
+    # Public mode revive counter.
+    # Loaded from devices.json as the configured starting maximum.
+    # The worker decrements it at runtime and never writes it back —
+    # it resets to this value on every app restart.
+    revive_count: int = 0
     notes: str = ""
 
 
@@ -126,7 +136,7 @@ class ProfileConfig:
     profile_name: str = ""
     role: str = "support"              # "lead" or "support"
     server_type: str = "private"       # "private" or "public"
-    status: str = "active"            # "active" or "stub"
+    status: str = "active"             # "active" or "stub"
     behaviors: Dict[str, Any] = field(default_factory=dict)
     detectors_required: List[str] = field(default_factory=list)
 
@@ -229,10 +239,12 @@ def load_devices() -> List[DeviceConfig]:
                 click_offset=det_data.get("click_offset", [0, 0]),
             )
 
-        # Parse timers
+        # Parse timers — supports both old format (no enabled flags) and new
         timer_data = entry.get("timers", {})
         timers = TimerConfig(
+            auto_farm_reset_enabled=timer_data.get("auto_farm_reset_enabled", True),
             auto_farm_reset_interval_min=timer_data.get("auto_farm_reset_interval_min", 15),
+            end_run_reset_enabled=timer_data.get("end_run_reset_enabled", True),
             end_run_reset_interval_min=timer_data.get("end_run_reset_interval_min", 10),
         )
 
@@ -249,6 +261,7 @@ def load_devices() -> List[DeviceConfig]:
             timers=timers,
             eaten_by_name_image=entry.get("eaten_by_name_image", ""),
             device_image_overrides=entry.get("device_image_overrides", []),
+            revive_count=entry.get("revive_count", 0),
             notes=entry.get("notes", ""),
         ))
 
@@ -259,8 +272,9 @@ def save_devices(devices: List[DeviceConfig]) -> None:
     """
     Write device list back to config/devices.json.
     Enforces the one-lead rule before saving.
+    Note: revive_count is saved as the configured starting maximum.
+    The live session count is never written back.
     """
-    # Enforce: only one lead allowed
     lead_count = sum(1 for d in devices if d.is_lead)
     if lead_count > 1:
         raise ValueError(f"Cannot save: {lead_count} devices marked as lead. Only 1 allowed.")
@@ -288,11 +302,14 @@ def save_devices(devices: List[DeviceConfig]) -> None:
             "scan_interval_ms": dev.scan_interval_ms,
             "detectors": detectors_data,
             "timers": {
+                "auto_farm_reset_enabled": dev.timers.auto_farm_reset_enabled,
                 "auto_farm_reset_interval_min": dev.timers.auto_farm_reset_interval_min,
+                "end_run_reset_enabled": dev.timers.end_run_reset_enabled,
                 "end_run_reset_interval_min": dev.timers.end_run_reset_interval_min,
             },
             "eaten_by_name_image": dev.eaten_by_name_image,
             "device_image_overrides": dev.device_image_overrides,
+            "revive_count": dev.revive_count,
             "notes": dev.notes,
         })
 
@@ -305,8 +322,6 @@ def load_profile(profile_name: str) -> ProfileConfig:
     Load a behavior profile from config/profiles/{profile_name}.yaml.
 
     Raises FileNotFoundError if the profile does not exist.
-    Stub profiles (status: stub) load successfully — the caller decides
-    whether to block on stub status.
     """
     path = _profiles_dir() / f"{profile_name}.yaml"
     if not path.exists():
@@ -345,7 +360,6 @@ def validate_devices(devices: List[DeviceConfig]) -> List[str]:
     """
     Run basic validation on the device list.
     Returns a list of warning strings (empty = all good).
-    These are warnings, not fatal errors — the UI shows them.
     """
     warnings = []
     lead_count = sum(1 for d in devices if d.is_lead)

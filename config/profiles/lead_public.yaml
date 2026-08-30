@@ -1,7 +1,7 @@
 profile_name: lead_public
 role: lead
 server_type: public
-status: stub   # Phase 3 — not yet implemented
+status: active
 
 behaviors:
   auto_farm_reset:
@@ -12,10 +12,25 @@ behaviors:
     enabled: true
     interval_min: 10
 
+  dead_state:
+    # Step 1: always turn off auto-farm first on death
+    disable_auto_on_death: true
+
+    # Step 2: always save a screenshot on death
+    save_screenshot: true
+
+    # Step 3: revive behavior
+    # revive_count comes from DeviceConfig.revive_count (set per-device in devices.json)
+    # When revives_remaining hits 0, moves to private and broadcasts to supports.
+    revive_enabled: true
+
   eaten_by_detection:
     enabled: true
-    trigger_support_end_run: false   # public mode: save screenshot only, no logic
-    save_screenshot: true
+    trigger_support_end_run: false   # public: supports handle their own deaths
+
+  move_to_private_on_revive_exhausted:
+    enabled: true
+    broadcast_to_supports: true
 
   rejoin_on_kick: true
 
@@ -24,6 +39,7 @@ detectors_required:
   - auto_button_off
   - end_run_button
   - death_screen
+  - revive_button
   - in_run_indicator
   - lobby_screen
   - roblox_home_screen

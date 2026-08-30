@@ -1,6 +1,7 @@
 profile_name: support_private
 role: support
 server_type: private
+status: active
 
 behaviors:
   auto_farm_reset:
@@ -19,8 +20,8 @@ behaviors:
     enabled: false    # support devices do not act on eaten-by detection
 
   rejoin_on_kick: true
-  rejoin_source: global_settings   # reads private_server_link from settings.json
-  auto_rejoin: true                # no signal needed, rejoin immediately on kick/crash
+  rejoin_source: global_settings
+  auto_rejoin: true
 
 detectors_required:
   - auto_button_on
