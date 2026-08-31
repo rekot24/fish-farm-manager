@@ -1,28 +1,31 @@
 """
 tools/image_capture_tool.py
 
-Guided Image Capture & Crop Tool.
+Detector setup and management tool. Two tabs:
 
-Walks through every detector required by a device's profile, one at a time:
-  1. Shows which image is needed with instructions
-  2. User manipulates the device to that state
-  3. User clicks Ready -> app captures a live frame via ADB
-  4. User drags to crop the region of interest
-  5. User chooses shared or device-specific save
-  6. Saved image resets click_offset to [0, 0] in devices.json
-  7. Test button: captures live frame, runs match, shows result + confidence
+  Tab 1 — Capture
+    Guided wizard: select a detector, capture a live frame via ADB,
+    drag to crop the region of interest, save as shared or device-specific,
+    then test to verify confidence.
 
-Also handles the special case of eaten_by_name_image capture.
+  Tab 2 — Manage
+    Table of all detectors showing image scope, file status, and last test
+    result per connected device. Run tests, promote/demote shared ↔ device-
+    specific, delete images, jump back to Capture for recapture.
+    Results are persisted to config/detector_results.json.
 """
 
 from __future__ import annotations
 
+import json
+import threading
+import subprocess
+from datetime import datetime
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
+
 import tkinter as tk
 from tkinter import ttk, messagebox
-import threading
-from pathlib import Path
-from typing import Optional, List
-import subprocess
 
 import cv2
 import numpy as np
@@ -30,11 +33,10 @@ from PIL import Image, ImageTk
 
 from bot.config_manager import (
     DeviceConfig, DetectorConfig,
-    load_devices, save_devices,
+    load_devices, save_devices, load_profile,
 )
-from bot.config_manager import load_profile
 from detection.template_bank import TemplateBank
-from detection.detector import find_by_path
+from detection.detector import find_by_path, run_detector_by_name
 
 
 # ---------------------------------------------------------------------------
@@ -50,216 +52,287 @@ DETECTOR_INSTRUCTIONS = {
     "lobby_screen":      "Navigate the device to the game lobby (not in a tank).",
     "roblox_home_screen":"Close or crash Roblox so the Roblox home/launcher screen is showing.",
     "eaten_by_name":     "Get any device to a death screen where THIS device's character name is visible as the eater.",
+    "revive_button":     "Get the device to a death screen in public mode where the revive button is visible.",
 }
 
-DEFAULT_INSTRUCTION = "Get the device to show this state, then press Ready."
+DEFAULT_INSTRUCTION = "Get the device to show this state, then press Ready — Capture Frame."
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+RESULTS_PATH = PROJECT_ROOT / "config" / "detector_results.json"
+
+
+# ---------------------------------------------------------------------------
+# Results persistence
+# ---------------------------------------------------------------------------
+
+def load_detector_results() -> Dict:
+    """Load saved detector test results from config/detector_results.json."""
+    if not RESULTS_PATH.exists():
+        return {}
+    try:
+        with open(RESULTS_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def save_detector_results(results: Dict) -> None:
+    """Persist detector test results to config/detector_results.json."""
+    RESULTS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(RESULTS_PATH, "w", encoding="utf-8") as f:
+        json.dump(results, f, indent=2)
+
+
+def record_result(
+    results: Dict,
+    detector_name: str,
+    device_serial: str,
+    score: float,
+    passed: bool,
+    image_scope: str,
+) -> None:
+    """Write one test result into the results dict (in-place)."""
+    if detector_name not in results:
+        results[detector_name] = {}
+    results[detector_name][device_serial] = {
+        "score": round(score, 4),
+        "passed": passed,
+        "tested_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "image_scope": image_scope,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Main tool window
+# ---------------------------------------------------------------------------
 
 class ImageCaptureTool:
     """
-    Guided image capture wizard for one device.
-    Launched from the device settings dialog.
+    Two-tab detector management tool. Launched from device settings dialog.
     """
 
-    def __init__(self, parent, device_cfg: DeviceConfig):
+    def __init__(self, parent, device_cfg: DeviceConfig, all_device_cfgs: List[DeviceConfig]):
         self.parent = parent
-        self.device_cfg = device_cfg
-        self.bank = TemplateBank()
+        self.device_cfg = device_cfg           # the "primary" device (whose settings launched this)
+        self.all_device_cfgs = all_device_cfgs # all configured devices (for Manage tab)
+        self.bank = TemplateBank(project_root=PROJECT_ROOT)
+        self.test_results = load_detector_results()
 
-        # Load profile to get required detectors
+        # Build required detector list from profile + eaten_by_name special case
         try:
             profile = load_profile(device_cfg.profile)
-            self.required_detectors = profile.detectors_required
+            self.required_detectors = list(profile.detectors_required)
         except Exception:
             self.required_detectors = []
 
-        # Add eaten_by_name as a special entry for all devices
         if "eaten_by_name" not in self.required_detectors:
-            self.required_detectors = list(self.required_detectors) + ["eaten_by_name"]
+            self.required_detectors.append("eaten_by_name")
 
-        # State
+        self._build()
+
+    # ------------------------------------------------------------------
+    # Top-level window and tab structure
+    # ------------------------------------------------------------------
+
+    def _build(self) -> None:
+        self.top = tk.Toplevel(self.parent)
+        self.top.title(
+            f"Detector Tool — {self.device_cfg.nickname or self.device_cfg.serial}"
+        )
+        self.top.geometry("1200x780")
+        self.top.resizable(True, True)
+
+        notebook = ttk.Notebook(self.top)
+        notebook.pack(fill="both", expand=True, padx=6, pady=6)
+
+        # Tab 1: Capture
+        self._capture_frame_tab = ttk.Frame(notebook)
+        notebook.add(self._capture_frame_tab, text="  Capture  ")
+        self._build_capture_tab(self._capture_frame_tab)
+
+        # Tab 2: Manage
+        self._manage_frame_tab = ttk.Frame(notebook)
+        notebook.add(self._manage_frame_tab, text="  Manage  ")
+        self._build_manage_tab(self._manage_frame_tab)
+
+        # Refresh manage tab whenever it becomes visible
+        notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
+
+    def _on_tab_changed(self, event) -> None:
+        nb = event.widget
+        if nb.index(nb.select()) == 1:
+            self._refresh_manage_table()
+
+    # ==================================================================
+    # TAB 1 — CAPTURE
+    # ==================================================================
+
+    def _build_capture_tab(self, parent: ttk.Frame) -> None:
+        """Build the guided capture wizard."""
+
+        # State for this tab
         self._current_frame: Optional[np.ndarray] = None
-        self._crop_start: Optional[tuple] = None
-        self._crop_rect: Optional[tuple] = None   # (x1, y1, x2, y2) in image coords
+        self._crop_start: Optional[Tuple] = None
+        self._crop_rect: Optional[Tuple] = None
         self._canvas_scale = 1.0
         self._canvas_offset = (0, 0)
         self._photo: Optional[ImageTk.PhotoImage] = None
         self._rect_id = None
         self._selected_detector: Optional[str] = None
 
-        self._build()
+        paned = ttk.PanedWindow(parent, orient="horizontal")
+        paned.pack(fill="both", expand=True, padx=4, pady=4)
 
-    # ------------------------------------------------------------------
-    # UI construction
-    # ------------------------------------------------------------------
-
-    def _build(self) -> None:
-        self.top = tk.Toplevel(self.parent)
-        self.top.title(f"Image Capture Tool — {self.device_cfg.nickname or self.device_cfg.serial}")
-        self.top.geometry("1100x720")
-        self.top.resizable(True, True)
-
-        # Main paned layout: left = detector list, right = capture/crop area
-        paned = ttk.PanedWindow(self.top, orient="horizontal")
-        paned.pack(fill="both", expand=True, padx=8, pady=8)
-
-        # ---- Left panel: detector list ----
-        left = ttk.Frame(paned, width=260)
+        # ---- Left: detector list ----
+        left = ttk.Frame(paned, width=240)
         paned.add(left, weight=0)
 
-        ttk.Label(left, text="Required Detectors",
-                  font=("TkDefaultFont", 10, "bold")).pack(anchor="w", pady=(0, 6))
+        ttk.Label(
+            left, text="Required Detectors",
+            font=("TkDefaultFont", 10, "bold")
+        ).pack(anchor="w", pady=(0, 6))
 
         list_frame = ttk.Frame(left)
         list_frame.pack(fill="both", expand=True)
 
-        scrollbar = ttk.Scrollbar(list_frame)
-        scrollbar.pack(side="right", fill="y")
+        sb = ttk.Scrollbar(list_frame)
+        sb.pack(side="right", fill="y")
 
         self._detector_list = tk.Listbox(
-            list_frame, yscrollcommand=scrollbar.set,
-            selectmode="single", width=30, activestyle="none"
+            list_frame, yscrollcommand=sb.set,
+            selectmode="single", width=28, activestyle="none",
+            font=("Consolas", 10),
         )
         self._detector_list.pack(side="left", fill="both", expand=True)
-        scrollbar.config(command=self._detector_list.yview)
+        sb.config(command=self._detector_list.yview)
         self._detector_list.bind("<<ListboxSelect>>", self._on_detector_select)
 
-        # ---- Right panel: capture and crop area ----
+        # ---- Right: capture/crop area ----
         right = ttk.Frame(paned)
         paned.add(right, weight=1)
         right.columnconfigure(0, weight=1)
         right.rowconfigure(2, weight=1)
 
-        # Instruction label
         self._lbl_instruction = ttk.Label(
-            right, text="Select a detector from the list to begin.",
-            wraplength=700, justify="left",
+            right,
+            text="Select a detector from the list to begin.",
+            wraplength=720, justify="left",
             font=("TkDefaultFont", 10),
         )
-        self._lbl_instruction.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        self._lbl_instruction.grid(row=0, column=0, sticky="ew", pady=(0, 6))
 
-        # Action buttons row
         btn_row = ttk.Frame(right)
-        btn_row.grid(row=1, column=0, sticky="w", pady=(0, 6))
+        btn_row.grid(row=1, column=0, sticky="w", pady=(0, 4))
 
         self._btn_ready = ttk.Button(
             btn_row, text="Ready — Capture Frame",
-            command=self._capture_frame, state="disabled"
+            command=self._capture_frame_from_device, state="disabled"
         )
-        self._btn_ready.pack(side="left", padx=(0, 8))
+        self._btn_ready.pack(side="left", padx=(0, 6))
 
         self._btn_save = ttk.Button(
             btn_row, text="Save Crop",
             command=self._save_crop, state="disabled"
         )
-        self._btn_save.pack(side="left", padx=(0, 8))
+        self._btn_save.pack(side="left", padx=(0, 6))
 
-        self._btn_test = ttk.Button(
+        self._btn_test_capture = ttk.Button(
             btn_row, text="Test Detection",
-            command=self._test_detection, state="disabled"
+            command=lambda: self._run_test_single(self._selected_detector, self.device_cfg),
+            state="disabled",
         )
-        self._btn_test.pack(side="left", padx=(0, 8))
+        self._btn_test_capture.pack(side="left", padx=(0, 6))
 
-        self._lbl_result = ttk.Label(btn_row, text="")
-        self._lbl_result.pack(side="left", padx=(12, 0))
+        self._lbl_capture_result = ttk.Label(btn_row, text="", font=("TkDefaultFont", 10))
+        self._lbl_capture_result.pack(side="left", padx=(10, 0))
 
-        # Canvas for displaying captured frame and drawing crop
-        canvas_frame = ttk.Frame(right, relief="sunken", borderwidth=1)
-        canvas_frame.grid(row=2, column=0, sticky="nsew")
-        canvas_frame.rowconfigure(0, weight=1)
-        canvas_frame.columnconfigure(0, weight=1)
+        # Canvas
+        canvas_wrap = ttk.Frame(right, relief="sunken", borderwidth=1)
+        canvas_wrap.grid(row=2, column=0, sticky="nsew")
+        canvas_wrap.rowconfigure(0, weight=1)
+        canvas_wrap.columnconfigure(0, weight=1)
 
-        self._canvas = tk.Canvas(canvas_frame, bg="#1a1a1a", cursor="crosshair")
+        self._canvas = tk.Canvas(canvas_wrap, bg="#1a1a1a", cursor="crosshair")
         self._canvas.grid(row=0, column=0, sticky="nsew")
         self._canvas.bind("<ButtonPress-1>", self._on_mouse_down)
         self._canvas.bind("<B1-Motion>", self._on_mouse_drag)
         self._canvas.bind("<ButtonRelease-1>", self._on_mouse_up)
 
-        # Status bar
-        self._lbl_status = ttk.Label(
+        self._lbl_capture_status = ttk.Label(
             right, text="No frame captured.", foreground="#888888"
         )
-        self._lbl_status.grid(row=3, column=0, sticky="w", pady=(4, 0))
+        self._lbl_capture_status.grid(row=3, column=0, sticky="w", pady=(3, 0))
 
-        # Populate detector list
-        self._populate_list()
+        self._populate_detector_list()
 
-    # ------------------------------------------------------------------
-    # Detector list
-    # ------------------------------------------------------------------
+    # ---- Detector list helpers ----
 
-    def _populate_list(self) -> None:
-        """Fill the listbox with detector names and status icons."""
+    def _populate_detector_list(self) -> None:
         self._detector_list.delete(0, "end")
         for name in self.required_detectors:
-            status = self._detector_status(name)
-            icon = {"ok": "✓", "missing": "✗", "untested": "?"}.get(status, "?")
-            self._detector_list.insert("end", f"  {icon}  {name}")
-            color = {"ok": "#00aa44", "missing": "#cc2222", "untested": "#aa8800"}.get(status, "#888888")
+            exists = self._image_exists(name, self.device_cfg)
+            icon = "✓" if exists else "✗"
+            self._detector_list.insert("end", f" {icon}  {name}")
+            color = "#00aa44" if exists else "#cc2222"
             self._detector_list.itemconfig("end", foreground=color)
 
-    def _detector_status(self, name: str) -> str:
-        """Return 'ok', 'missing', or 'untested' for a detector."""
-        if name == "eaten_by_name":
-            path = self.device_cfg.eaten_by_name_image
-            return "ok" if path and Path(path).exists() else "missing"
+    def _image_exists(self, detector_name: str, dev: DeviceConfig) -> bool:
+        if detector_name == "eaten_by_name":
+            p = dev.eaten_by_name_image
+            return bool(p) and (PROJECT_ROOT / p).exists()
+        return self.bank.exists(detector_name, dev.serial, dev.device_image_overrides)
 
-        exists = self.bank.exists(name, self.device_cfg.serial, self.device_cfg.device_image_overrides)
-        # We mark existing images as 'untested' until a test is run this session
-        return "untested" if exists else "missing"
+    def _get_image_scope(self, detector_name: str, dev: DeviceConfig) -> str:
+        """Return 'device:{serial}', 'shared', or 'missing'."""
+        if detector_name == "eaten_by_name":
+            p = dev.eaten_by_name_image
+            return f"device:{dev.serial}" if (p and (PROJECT_ROOT / p).exists()) else "missing"
+        if not self.bank.exists(detector_name, dev.serial, dev.device_image_overrides):
+            return "missing"
+        if detector_name in dev.device_image_overrides:
+            return f"device:{dev.serial}"
+        return "shared"
 
     def _on_detector_select(self, event) -> None:
-        """User clicked a detector in the list."""
         sel = self._detector_list.curselection()
         if not sel:
             return
-        idx = sel[0]
-        name = self.required_detectors[idx]
+        name = self.required_detectors[sel[0]]
         self._selected_detector = name
 
         instruction = DETECTOR_INSTRUCTIONS.get(name, DEFAULT_INSTRUCTION)
         self._lbl_instruction.config(text=f"Detector: {name}\n\n{instruction}")
         self._btn_ready.config(state="normal")
         self._btn_save.config(state="disabled")
-        self._lbl_result.config(text="")
+        self._lbl_capture_result.config(text="")
 
-        # Enable test button only if image already exists
-        if self._detector_status(name) != "missing":
-            self._btn_test.config(state="normal")
-        else:
-            self._btn_test.config(state="disabled")
-
+        exists = self._image_exists(name, self.device_cfg)
+        self._btn_test_capture.config(state="normal" if exists else "disabled")
         self._clear_canvas()
 
-    # ------------------------------------------------------------------
-    # Frame capture
-    # ------------------------------------------------------------------
+    # ---- Frame capture ----
 
-    def _capture_frame(self) -> None:
-        """Capture a live frame from the device via ADB screencap."""
+    def _capture_frame_from_device(self, device_cfg: Optional[DeviceConfig] = None) -> None:
+        dev = device_cfg or self.device_cfg
         self._btn_ready.config(state="disabled")
-        self._lbl_status.config(text="Capturing frame...")
+        self._lbl_capture_status.config(text="Capturing frame...")
         self.top.update_idletasks()
 
         def do_capture():
             try:
                 result = subprocess.run(
-                    ["adb", "-s", self.device_cfg.serial,
-                     "exec-out", "screencap", "-p"],
+                    ["adb", "-s", dev.serial, "exec-out", "screencap", "-p"],
                     capture_output=True, timeout=10,
                 )
                 if result.returncode != 0 or not result.stdout:
                     self.top.after(0, lambda: self._capture_failed("ADB screencap returned no data"))
                     return
-
-                img_array = np.frombuffer(result.stdout, dtype=np.uint8)
-                frame = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+                arr = np.frombuffer(result.stdout, dtype=np.uint8)
+                frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
                 if frame is None:
                     self.top.after(0, lambda: self._capture_failed("Could not decode screenshot"))
                     return
-
                 self.top.after(0, lambda: self._capture_success(frame))
-
             except subprocess.TimeoutExpired:
                 self.top.after(0, lambda: self._capture_failed("ADB timed out"))
             except Exception as e:
@@ -272,39 +345,31 @@ class ImageCaptureTool:
         self._crop_rect = None
         self._btn_ready.config(state="normal")
         self._btn_save.config(state="disabled")
-        self._lbl_result.config(text="")
+        self._lbl_capture_result.config(text="")
         h, w = frame.shape[:2]
-        self._lbl_status.config(text=f"Frame captured: {w}x{h}. Drag to crop the target region.")
+        self._lbl_capture_status.config(
+            text=f"Frame captured: {w}×{h}. Drag to crop the target region."
+        )
         self._display_frame(frame)
 
     def _capture_failed(self, reason: str) -> None:
         self._btn_ready.config(state="normal")
-        self._lbl_status.config(text=f"Capture failed: {reason}", foreground="red")
+        self._lbl_capture_status.config(text=f"Capture failed: {reason}", foreground="red")
 
-    # ------------------------------------------------------------------
-    # Canvas display and crop drawing
-    # ------------------------------------------------------------------
+    # ---- Canvas display and crop ----
 
     def _display_frame(self, frame: np.ndarray) -> None:
-        """Scale the frame to fit the canvas and display it."""
-        canvas_w = self._canvas.winfo_width() or 800
-        canvas_h = self._canvas.winfo_height() or 500
-
+        cw = self._canvas.winfo_width() or 860
+        ch = self._canvas.winfo_height() or 520
         fh, fw = frame.shape[:2]
-        scale = min(canvas_w / fw, canvas_h / fh, 1.0)
-        new_w = int(fw * scale)
-        new_h = int(fh * scale)
-
+        scale = min(cw / fw, ch / fh, 1.0)
+        nw, nh = int(fw * scale), int(fh * scale)
         self._canvas_scale = scale
-        self._canvas_offset = (
-            (canvas_w - new_w) // 2,
-            (canvas_h - new_h) // 2,
-        )
+        self._canvas_offset = ((cw - nw) // 2, (ch - nh) // 2)
 
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        pil = Image.fromarray(rgb).resize((new_w, new_h), Image.LANCZOS)
+        pil = Image.fromarray(rgb).resize((nw, nh), Image.LANCZOS)
         self._photo = ImageTk.PhotoImage(pil)
-
         self._canvas.delete("all")
         ox, oy = self._canvas_offset
         self._canvas.create_image(ox, oy, anchor="nw", image=self._photo)
@@ -316,14 +381,10 @@ class ImageCaptureTool:
         self._crop_rect = None
         self._photo = None
 
-    # ---- Mouse events for crop rectangle ----
-
-    def _canvas_to_image(self, cx: int, cy: int) -> tuple:
-        """Convert canvas pixel coords to image pixel coords."""
+    def _canvas_to_image(self, cx: int, cy: int) -> Tuple[int, int]:
         ox, oy = self._canvas_offset
-        scale = self._canvas_scale
-        ix = int((cx - ox) / scale)
-        iy = int((cy - oy) / scale)
+        ix = int((cx - ox) / self._canvas_scale)
+        iy = int((cy - oy) / self._canvas_scale)
         if self._current_frame is not None:
             h, w = self._current_frame.shape[:2]
             ix = max(0, min(ix, w - 1))
@@ -346,37 +407,28 @@ class ImageCaptureTool:
         x0, y0 = self._crop_start
         self._rect_id = self._canvas.create_rectangle(
             x0, y0, event.x, event.y,
-            outline="#00ff88", width=2, dash=(4, 2)
+            outline="#00ff88", width=2, dash=(4, 2),
         )
 
     def _on_mouse_up(self, event) -> None:
         if not self._crop_start or self._current_frame is None:
             return
         x0, y0 = self._crop_start
-        x1, y1 = event.x, event.y
-
-        # Convert both corners to image coords
-        ix0, iy0 = self._canvas_to_image(min(x0, x1), min(y0, y1))
-        ix1, iy1 = self._canvas_to_image(max(x0, x1), max(y0, y1))
-
+        ix0, iy0 = self._canvas_to_image(min(x0, event.x), min(y0, event.y))
+        ix1, iy1 = self._canvas_to_image(max(x0, event.x), max(y0, event.y))
         if ix1 - ix0 < 5 or iy1 - iy0 < 5:
-            self._lbl_status.config(text="Crop too small. Drag a larger region.")
+            self._lbl_capture_status.config(text="Crop too small — drag a larger region.")
             return
-
         self._crop_rect = (ix0, iy0, ix1, iy1)
-        w = ix1 - ix0
-        h = iy1 - iy0
-        self._lbl_status.config(text=f"Crop selected: {w}x{h} at ({ix0}, {iy0}). Click Save Crop to save.")
+        self._lbl_capture_status.config(
+            text=f"Crop: {ix1-ix0}×{iy1-iy0} at ({ix0},{iy0}). Click Save Crop to save."
+        )
         self._btn_save.config(state="normal")
 
-    # ------------------------------------------------------------------
-    # Save crop
-    # ------------------------------------------------------------------
+    # ---- Save crop ----
 
     def _save_crop(self) -> None:
-        if self._current_frame is None or self._crop_rect is None:
-            return
-        if not self._selected_detector:
+        if self._current_frame is None or self._crop_rect is None or not self._selected_detector:
             return
 
         name = self._selected_detector
@@ -387,219 +439,816 @@ class ImageCaptureTool:
             messagebox.showerror("Error", "Crop region is empty.", parent=self.top)
             return
 
-        # eaten_by_name is always device-specific
         if name == "eaten_by_name":
-            self._save_eaten_by_name(crop)
+            self._do_save_eaten_by(crop)
             return
 
-        # Ask: shared or device-specific?
         choice = _AskSaveScope(self.top, name).result
         if choice is None:
-            return  # cancelled
-
-        save_as_device = (choice == "device")
-        self._do_save(crop, name, save_as_device)
+            return
+        self._do_save(crop, name, device_specific=(choice == "device"))
 
     def _do_save(self, crop: np.ndarray, name: str, device_specific: bool) -> None:
-        """Save the cropped image and update devices.json."""
-        project_root = Path(__file__).resolve().parent.parent
-
         if device_specific:
-            out_dir = project_root / "assets" / "devices" / self.device_cfg.serial
-            out_dir.mkdir(parents=True, exist_ok=True)
-            out_path = out_dir / f"{name}.png"
+            out_dir = PROJECT_ROOT / "assets" / "devices" / self.device_cfg.serial
         else:
-            out_dir = project_root / "assets" / "shared"
-            out_dir.mkdir(parents=True, exist_ok=True)
-            out_path = out_dir / f"{name}.png"
-
+            out_dir = PROJECT_ROOT / "assets" / "shared"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / f"{name}.png"
         cv2.imwrite(str(out_path), crop)
 
         # Update devices.json
         devices = load_devices()
         for dev in devices:
             if dev.serial == self.device_cfg.serial:
-                # Update device_image_overrides
                 overrides = list(dev.device_image_overrides)
                 if device_specific and name not in overrides:
                     overrides.append(name)
                 elif not device_specific and name in overrides:
                     overrides.remove(name)
                 dev.device_image_overrides = overrides
-
-                # Reset click_offset for this detector
                 if name not in dev.detectors:
                     dev.detectors[name] = DetectorConfig(
-                        image=str(out_path.relative_to(project_root)),
+                        image=str(out_path.relative_to(PROJECT_ROOT)),
                         click_offset=[0, 0],
                     )
                 else:
-                    dev.detectors[name].image = str(out_path.relative_to(project_root))
+                    dev.detectors[name].image = str(out_path.relative_to(PROJECT_ROOT))
                     dev.detectors[name].click_offset = [0, 0]
-
-                # Update our local copy
                 self.device_cfg = dev
                 break
-
         save_devices(devices)
 
-        # Invalidate template bank cache so the new image loads on next detection
+        # Invalidate cache
         if device_specific:
             self.bank.invalidate(name, self.device_cfg.serial)
         else:
             self.bank.invalidate(name, None)
 
-        self._btn_test.config(state="normal")
-        self._lbl_status.config(
-            text=f"Saved: {out_path.name} ({'device-specific' if device_specific else 'shared'}). "
-                 f"Click_offset reset to [0,0]. Run Test Detection to verify."
+        scope = f"device-specific ({self.device_cfg.nickname})" if device_specific else "shared"
+        self._lbl_capture_status.config(
+            text=f"Saved {name}.png as {scope}. Run Test Detection to verify."
         )
-        self._populate_list()
+        self._btn_test_capture.config(state="normal")
+        self._populate_detector_list()
 
-    def _save_eaten_by_name(self, crop: np.ndarray) -> None:
-        """Save the eaten-by name image for this device."""
-        project_root = Path(__file__).resolve().parent.parent
-        out_dir = project_root / "assets" / "devices" / self.device_cfg.serial
+    def _do_save_eaten_by(self, crop: np.ndarray) -> None:
+        out_dir = PROJECT_ROOT / "assets" / "devices" / self.device_cfg.serial
         out_dir.mkdir(parents=True, exist_ok=True)
         out_path = out_dir / "eaten_by_name.png"
-
         cv2.imwrite(str(out_path), crop)
 
-        # Update devices.json
         devices = load_devices()
         for dev in devices:
             if dev.serial == self.device_cfg.serial:
-                dev.eaten_by_name_image = str(out_path.relative_to(project_root))
+                dev.eaten_by_name_image = str(out_path.relative_to(PROJECT_ROOT))
                 self.device_cfg = dev
                 break
-
         save_devices(devices)
         self.bank.invalidate_by_path(str(out_path))
 
-        self._lbl_status.config(
-            text=f"Saved eaten_by_name image for {self.device_cfg.nickname or self.device_cfg.serial}. "
-                 f"Run Test Detection to verify."
+        self._lbl_capture_status.config(
+            text=f"Saved eaten_by_name for {self.device_cfg.nickname}. Run Test Detection to verify."
         )
-        self._btn_test.config(state="normal")
-        self._populate_list()
+        self._btn_test_capture.config(state="normal")
+        self._populate_detector_list()
 
-    # ------------------------------------------------------------------
-    # Test detection
-    # ------------------------------------------------------------------
+    # ==================================================================
+    # TAB 2 — MANAGE
+    # ==================================================================
 
-    def _test_detection(self) -> None:
-        """Capture a live frame and run template match against the saved image."""
-        if not self._selected_detector:
+    def _build_manage_tab(self, parent: ttk.Frame) -> None:
+        parent.columnconfigure(0, weight=1)
+        parent.rowconfigure(1, weight=1)
+
+        # ---- Toolbar ----
+        toolbar = ttk.Frame(parent)
+        toolbar.grid(row=0, column=0, sticky="ew", padx=4, pady=(4, 2))
+
+        ttk.Label(toolbar, text="Test on devices:").pack(side="left", padx=(0, 8))
+
+        # Device checkbox container — rebuilt dynamically when device list changes
+        self._device_checkbox_frame = ttk.Frame(toolbar)
+        self._device_checkbox_frame.pack(side="left")
+        self._device_vars: Dict[str, tk.BooleanVar] = {}
+        self._known_device_serials: List[str] = []  # tracks last-known list for change detection
+        self._build_device_checkboxes()
+
+        ttk.Separator(toolbar, orient="vertical").pack(side="left", fill="y", padx=8)
+
+        ttk.Button(
+            toolbar, text="▶  Run Tests on Selected",
+            command=self._run_tests_selected,
+        ).pack(side="left", padx=(0, 6))
+
+        ttk.Button(
+            toolbar, text="↺  Refresh",
+            command=self._refresh_manage_table,
+        ).pack(side="left")
+
+        # ---- Main paned area: left = detector checklist, right = table ----
+        paned = ttk.PanedWindow(parent, orient="horizontal")
+        paned.grid(row=1, column=0, sticky="nsew", padx=4, pady=(2, 0))
+
+        # Left: detector checklist
+        left = ttk.Frame(paned, width=220)
+        paned.add(left, weight=0)
+        left.rowconfigure(1, weight=1)
+        left.columnconfigure(0, weight=1)
+
+        # Check All / Uncheck All buttons
+        chk_ctrl = ttk.Frame(left)
+        chk_ctrl.grid(row=0, column=0, sticky="ew", pady=(0, 4))
+        ttk.Button(chk_ctrl, text="All",
+                   command=self._check_all_detectors, width=5).pack(side="left", padx=(0, 4))
+        ttk.Button(chk_ctrl, text="None",
+                   command=self._uncheck_all_detectors, width=5).pack(side="left")
+
+        det_list_frame = ttk.Frame(left)
+        det_list_frame.grid(row=1, column=0, sticky="nsew")
+        det_list_frame.rowconfigure(0, weight=1)
+        det_list_frame.columnconfigure(0, weight=1)
+
+        det_sb = ttk.Scrollbar(det_list_frame)
+        det_sb.grid(row=0, column=1, sticky="ns")
+
+        self._manage_det_list = tk.Listbox(
+            det_list_frame, yscrollcommand=det_sb.set,
+            selectmode="single", width=26, activestyle="none",
+            font=("Consolas", 10),
+        )
+        self._manage_det_list.grid(row=0, column=0, sticky="nsew")
+        det_sb.config(command=self._manage_det_list.yview)
+
+        # Detector checkboxes dict: name -> BooleanVar
+        self._detector_check_vars: Dict[str, tk.BooleanVar] = {}
+        self._build_detector_checklist()
+
+        # Right: results table
+        right = ttk.Frame(paned)
+        paned.add(right, weight=1)
+        right.rowconfigure(0, weight=1)
+        right.columnconfigure(0, weight=1)
+
+        self._build_manage_tree(right)
+
+        # ---- Status bar ----
+        self._lbl_manage_status = ttk.Label(
+            parent, text="", foreground="#888888"
+        )
+        self._lbl_manage_status.grid(row=2, column=0, sticky="w", padx=4, pady=(0, 2))
+
+        # ---- Action buttons panel ----
+        action_frame = ttk.LabelFrame(parent, text="Selected Detector", padding=6)
+        action_frame.grid(row=3, column=0, sticky="ew", padx=4, pady=(0, 4))
+
+        self._btn_recapture = ttk.Button(
+            action_frame, text="📷  Recapture",
+            command=self._action_recapture, state="disabled",
+        )
+        self._btn_recapture.pack(side="left", padx=(0, 6))
+
+        self._btn_toggle_scope = ttk.Button(
+            action_frame, text="⇄  Toggle Shared/Device",
+            command=self._action_toggle_scope, state="disabled",
+        )
+        self._btn_toggle_scope.pack(side="left", padx=(0, 6))
+
+        self._btn_delete_image = ttk.Button(
+            action_frame, text="🗑  Delete Image",
+            command=self._action_delete_image, state="disabled",
+        )
+        self._btn_delete_image.pack(side="left", padx=(0, 6))
+
+        self._lbl_selected = ttk.Label(
+            action_frame, text="No detector selected.", foreground="#888888"
+        )
+        self._lbl_selected.pack(side="left", padx=(12, 0))
+
+        self._tree.bind("<<TreeviewSelect>>", self._on_tree_select)
+
+        self._refresh_manage_table()
+
+        # Start background ADB poll — only rebuilds checkboxes if device list changed
+        self._start_device_poll()
+
+    def _build_device_checkboxes(self) -> None:
+        """Build or rebuild the device checkbox row from current all_device_cfgs."""
+        for widget in self._device_checkbox_frame.winfo_children():
+            widget.destroy()
+
+        self._known_device_serials = [d.serial for d in self.all_device_cfgs]
+
+        for dev in self.all_device_cfgs:
+            # Preserve existing checked state if the device was already there
+            if dev.serial not in self._device_vars:
+                self._device_vars[dev.serial] = tk.BooleanVar(
+                    value=(dev.serial == self.device_cfg.serial)
+                )
+            ttk.Checkbutton(
+                self._device_checkbox_frame,
+                text=dev.nickname or dev.serial[:8],
+                variable=self._device_vars[dev.serial],
+            ).pack(side="left", padx=(0, 6))
+
+    def _build_detector_checklist(self) -> None:
+        """Populate the detector checklist on the left of the Manage tab."""
+        self._manage_det_list.delete(0, "end")
+        self._detector_check_vars.clear()
+
+        for name in self.required_detectors:
+            var = tk.BooleanVar(value=True)
+            self._detector_check_vars[name] = var
+            self._manage_det_list.insert("end", f" ☑  {name}")
+            self._manage_det_list.itemconfig("end", foreground="#333333")
+
+        # Toggle checkbox state on click
+        self._manage_det_list.bind("<ButtonRelease-1>", self._on_det_checklist_click)
+
+    def _on_det_checklist_click(self, event) -> None:
+        """Toggle the checkbox for the clicked detector row."""
+        idx = self._manage_det_list.nearest(event.y)
+        if idx < 0 or idx >= len(self.required_detectors):
+            return
+        name = self.required_detectors[idx]
+        var = self._detector_check_vars[name]
+        var.set(not var.get())
+        self._update_det_checklist_display()
+
+    def _update_det_checklist_display(self) -> None:
+        """Redraw checklist icons to match current checkbox states."""
+        for idx, name in enumerate(self.required_detectors):
+            checked = self._detector_check_vars[name].get()
+            icon = "☑" if checked else "☐"
+            color = "#333333" if checked else "#888888"
+            self._manage_det_list.delete(idx)
+            self._manage_det_list.insert(idx, f" {icon}  {name}")
+            self._manage_det_list.itemconfig(idx, foreground=color)
+
+    def _check_all_detectors(self) -> None:
+        for var in self._detector_check_vars.values():
+            var.set(True)
+        self._update_det_checklist_display()
+
+    def _uncheck_all_detectors(self) -> None:
+        for var in self._detector_check_vars.values():
+            var.set(False)
+        self._update_det_checklist_display()
+
+    def _build_manage_tree(self, parent: ttk.Frame) -> None:
+        """Build the results treeview. Called once; columns rebuilt if devices change."""
+        fixed_cols = ("detector", "scope", "file")
+        device_cols = tuple(f"dev_{d.serial}" for d in self.all_device_cfgs)
+        action_col = ("actions",)
+        all_cols = fixed_cols + device_cols + action_col
+
+        self._tree = ttk.Treeview(
+            parent,
+            columns=all_cols,
+            show="headings",
+            selectmode="browse",
+        )
+
+        self._tree.heading("detector", text="Detector")
+        self._tree.heading("scope",    text="Scope")
+        self._tree.heading("file",     text="File")
+        self._tree.column("detector", width=160, minwidth=120, anchor="w")
+        self._tree.column("scope",    width=160, minwidth=120, anchor="w")
+        self._tree.column("file",     width=50,  minwidth=40,  anchor="center")
+
+        for dev in self.all_device_cfgs:
+            col = f"dev_{dev.serial}"
+            label = dev.nickname or dev.serial[:8]
+            self._tree.heading(col, text=label)
+            self._tree.column(col, width=130, minwidth=100, anchor="center")
+
+        self._tree.heading("actions", text="Actions")
+        self._tree.column("actions", width=180, minwidth=160, anchor="w")
+
+        vsb = ttk.Scrollbar(parent, orient="vertical", command=self._tree.yview)
+        self._tree.configure(yscrollcommand=vsb.set)
+        self._tree.grid(row=0, column=0, sticky="nsew")
+        vsb.grid(row=0, column=1, sticky="ns")
+
+        self._tree.tag_configure("ok",       foreground="#00aa44")
+        self._tree.tag_configure("missing",  foreground="#cc2222")
+        self._tree.tag_configure("untested", foreground="#aa8800")
+        self._tree.tag_configure("failed",   foreground="#cc2222")
+
+    def _start_device_poll(self) -> None:
+        """
+        Background thread: polls ADB every 5s.
+        Only triggers a UI rebuild if the device list actually changed —
+        either new serials appeared (new device added to devices.json)
+        or a previously known serial is now missing.
+        """
+        def poll():
+            while True:
+                try:
+                    # Reload devices.json to pick up newly added devices
+                    fresh = load_devices()
+                    fresh_serials = [d.serial for d in fresh]
+
+                    if fresh_serials != self._known_device_serials:
+                        # Device list changed — rebuild checkboxes on UI thread
+                        self.all_device_cfgs = fresh
+                        self.top.after(0, self._on_device_list_changed)
+                except Exception:
+                    pass
+
+                # Use the window's after() to check if the window is still alive
+                # before sleeping — if it's been destroyed, stop polling
+                try:
+                    self.top.winfo_exists()
+                except Exception:
+                    return
+
+                import time
+                time.sleep(5)
+
+        threading.Thread(target=poll, daemon=True).start()
+
+    def _on_device_list_changed(self) -> None:
+        """Called on the UI thread when the device list has changed."""
+        try:
+            if not self.top.winfo_exists():
+                return
+        except Exception:
             return
 
-        self._lbl_result.config(text="Testing...", foreground="#888888")
-        self._btn_test.config(state="disabled")
+        self._build_device_checkboxes()
+        # Rebuild the tree with new device columns
+        for widget in self._tree.master.winfo_children():
+            widget.destroy()
+        self._build_manage_tree(self._tree.master)
+        self._tree.bind("<<TreeviewSelect>>", self._on_tree_select)
+        self._refresh_manage_table()
+
+    def _refresh_manage_table(self) -> None:
+        """Rebuild the manage table from current disk state and saved results."""
+        fresh_devices = load_devices()
+        self.all_device_cfgs = fresh_devices
+        for dev in fresh_devices:
+            if dev.serial == self.device_cfg.serial:
+                self.device_cfg = dev
+                break
+
+        self._tree.delete(*self._tree.get_children())
+
+        for det_name in self.required_detectors:
+            scope = self._get_image_scope(det_name, self.device_cfg)
+            file_ok = "✓" if scope != "missing" else "✗"
+
+            if scope == "missing":
+                scope_text = "— missing —"
+            elif scope == "shared":
+                scope_text = "Shared"
+            else:
+                serial = scope.split(":", 1)[1]
+                nick = next(
+                    (d.nickname or d.serial[:8] for d in self.all_device_cfgs if d.serial == serial),
+                    serial[:8],
+                )
+                scope_text = f"Device: {nick}"
+
+            row_values = [det_name, scope_text, file_ok]
+            row_tag = "ok" if file_ok == "✓" else "missing"
+
+            for dev in self.all_device_cfgs:
+                det_results = self.test_results.get(det_name, {})
+                dev_result = det_results.get(dev.serial)
+                if dev_result is None:
+                    cell = "—"
+                    if row_tag == "ok":
+                        row_tag = "untested"
+                elif dev_result["passed"]:
+                    pct = int(dev_result["score"] * 100)
+                    ts = dev_result["tested_at"][11:16]
+                    cell = f"✓ {pct}%  {ts}"
+                else:
+                    pct = int(dev_result["score"] * 100)
+                    cell = f"✗ {pct}%"
+                    row_tag = "failed"
+                row_values.append(cell)
+
+            row_values.append("Select row to act")
+
+            self._tree.insert(
+                "", "end",
+                iid=det_name,
+                values=row_values,
+                tags=(row_tag,),
+            )
+
+        self._lbl_manage_status.config(
+            text=f"Showing {len(self.required_detectors)} detectors · "
+                 f"{len(self.all_device_cfgs)} devices · "
+                 f"Last refresh: {datetime.now().strftime('%H:%M:%S')}"
+        )
+
+    def _on_tree_select(self, event) -> None:
+        sel = self._tree.selection()
+        if not sel:
+            self._btn_recapture.config(state="disabled")
+            self._btn_toggle_scope.config(state="disabled")
+            self._btn_delete_image.config(state="disabled")
+            self._lbl_selected.config(text="No detector selected.")
+            return
+
+        det_name = sel[0]
+        scope = self._get_image_scope(det_name, self.device_cfg)
+        exists = scope != "missing"
+
+        self._btn_recapture.config(state="normal")
+        self._btn_toggle_scope.config(state="normal" if exists else "disabled")
+        self._btn_delete_image.config(state="normal" if exists else "disabled")
+
+        scope_label = "shared" if scope == "shared" else (
+            f"device-specific ({self.device_cfg.nickname})" if exists else "missing"
+        )
+        self._lbl_selected.config(
+            text=f"{det_name}  ·  {scope_label}",
+            foreground="#333333",
+        )
+
+    # ---- Test runner ----
+
+    def _run_tests_selected(self) -> None:
+        """
+        Run detection tests for checked detectors on checked devices.
+        Each device gets one screenshot capture; only the checked detectors
+        are tested against it so you control exactly what's being evaluated.
+        """
+        selected_serials = [s for s, v in self._device_vars.items() if v.get()]
+        if not selected_serials:
+            messagebox.showinfo(
+                "No Devices",
+                "Check at least one device to test against.",
+                parent=self.top,
+            )
+            return
+
+        selected_detectors = [
+            name for name in self.required_detectors
+            if self._detector_check_vars.get(name, tk.BooleanVar(value=False)).get()
+        ]
+        if not selected_detectors:
+            messagebox.showinfo(
+                "No Detectors",
+                "Check at least one detector to test.",
+                parent=self.top,
+            )
+            return
+
+        selected_devs = [d for d in self.all_device_cfgs if d.serial in selected_serials]
+        n_tests = len(selected_detectors) * len(selected_devs)
+        self._lbl_manage_status.config(
+            text=f"Running {n_tests} test(s) "
+                 f"({len(selected_detectors)} detector(s) × {len(selected_devs)} device(s))..."
+        )
+        self.top.update_idletasks()
+
+        def do_tests():
+            for dev in selected_devs:
+                # One screenshot capture per device
+                try:
+                    result = subprocess.run(
+                        ["adb", "-s", dev.serial, "exec-out", "screencap", "-p"],
+                        capture_output=True, timeout=15,
+                    )
+                    if result.returncode != 0 or not result.stdout:
+                        self.top.after(0, lambda d=dev: self._lbl_manage_status.config(
+                            text=f"Capture failed for {d.nickname or d.serial}"
+                        ))
+                        continue
+                    arr = np.frombuffer(result.stdout, dtype=np.uint8)
+                    frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+                    if frame is None:
+                        continue
+                except Exception as e:
+                    self.top.after(0, lambda e=e: self._lbl_manage_status.config(
+                        text=f"Error capturing {dev.nickname or dev.serial}: {e}"
+                    ))
+                    continue
+
+                # Only test the checked detectors
+                for det_name in selected_detectors:
+                    if det_name == "eaten_by_name":
+                        path = dev.eaten_by_name_image
+                        if not path or not (PROJECT_ROOT / path).exists():
+                            continue
+                        detect_result = find_by_path(
+                            frame_bgr=frame,
+                            image_path=str(PROJECT_ROOT / path),
+                            bank=self.bank,
+                            detector_name="eaten_by_name",
+                        )
+                    else:
+                        if not self.bank.exists(det_name, dev.serial, dev.device_image_overrides):
+                            continue
+                        detect_result = run_detector_by_name(
+                            detector_name=det_name,
+                            frame_bgr=frame,
+                            device_serial=dev.serial,
+                            device_overrides=dev.device_image_overrides,
+                            bank=self.bank,
+                        )
+
+                    scope = self._get_image_scope(det_name, dev)
+                    record_result(
+                        self.test_results,
+                        det_name,
+                        dev.serial,
+                        score=detect_result.score or 0.0,
+                        passed=detect_result.found,
+                        image_scope=scope,
+                    )
+
+            save_detector_results(self.test_results)
+            self.top.after(0, self._refresh_manage_table)
+
+        threading.Thread(target=do_tests, daemon=True).start()
+
+    def _run_test_single(
+        self,
+        detector_name: Optional[str],
+        dev: DeviceConfig,
+    ) -> None:
+        """Run a single detector test from the Capture tab."""
+        if not detector_name:
+            return
+
+        self._lbl_capture_result.config(text="Testing...", foreground="#888888")
+        self._btn_test_capture.config(state="disabled")
         self.top.update_idletasks()
 
         def do_test():
-            # Capture live frame
             try:
                 result = subprocess.run(
-                    ["adb", "-s", self.device_cfg.serial,
-                     "exec-out", "screencap", "-p"],
+                    ["adb", "-s", dev.serial, "exec-out", "screencap", "-p"],
                     capture_output=True, timeout=10,
                 )
                 if result.returncode != 0 or not result.stdout:
-                    self.top.after(0, lambda: self._test_done(None, "Capture failed"))
+                    self.top.after(0, lambda: self._single_test_done(None, "Capture failed"))
                     return
-
-                img_array = np.frombuffer(result.stdout, dtype=np.uint8)
-                frame = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+                arr = np.frombuffer(result.stdout, dtype=np.uint8)
+                frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
                 if frame is None:
-                    self.top.after(0, lambda: self._test_done(None, "Decode failed"))
+                    self.top.after(0, lambda: self._single_test_done(None, "Decode failed"))
                     return
-
             except Exception as e:
-                self.top.after(0, lambda: self._test_done(None, str(e)))
+                self.top.after(0, lambda: self._single_test_done(None, str(e)))
                 return
 
-            # Run match
-            name = self._selected_detector
             try:
-                if name == "eaten_by_name":
-                    path = self.device_cfg.eaten_by_name_image
+                if detector_name == "eaten_by_name":
+                    path = dev.eaten_by_name_image
                     if not path:
-                        self.top.after(0, lambda: self._test_done(None, "No eaten_by_name image saved"))
+                        self.top.after(0, lambda: self._single_test_done(None, "No image saved"))
                         return
                     detect_result = find_by_path(
                         frame_bgr=frame,
-                        image_path=path,
+                        image_path=str(PROJECT_ROOT / path),
                         bank=self.bank,
                         detector_name="eaten_by_name",
                     )
                 else:
-                    from detection.detector import run_detector_by_name
                     detect_result = run_detector_by_name(
-                        detector_name=name,
+                        detector_name=detector_name,
                         frame_bgr=frame,
-                        device_serial=self.device_cfg.serial,
-                        device_overrides=self.device_cfg.device_image_overrides,
+                        device_serial=dev.serial,
+                        device_overrides=dev.device_image_overrides,
                         bank=self.bank,
                     )
 
-                self.top.after(0, lambda r=detect_result, f=frame: self._test_done(r, None, f))
+                scope = self._get_image_scope(detector_name, dev)
+                record_result(
+                    self.test_results,
+                    detector_name,
+                    dev.serial,
+                    score=detect_result.score or 0.0,
+                    passed=detect_result.found,
+                    image_scope=scope,
+                )
+                save_detector_results(self.test_results)
+                self.top.after(0, lambda r=detect_result, f=frame: self._single_test_done(r, None, f))
 
             except Exception as e:
-                self.top.after(0, lambda: self._test_done(None, str(e)))
+                self.top.after(0, lambda: self._single_test_done(None, str(e)))
 
         threading.Thread(target=do_test, daemon=True).start()
 
-    def _test_done(self, result, error: Optional[str], frame=None) -> None:
-        self._btn_test.config(state="normal")
-
+    def _single_test_done(
+        self,
+        result,
+        error: Optional[str],
+        frame: Optional[np.ndarray] = None,
+    ) -> None:
+        self._btn_test_capture.config(state="normal")
         if error:
-            self._lbl_result.config(text=f"Error: {error}", foreground="#cc2222")
+            self._lbl_capture_result.config(text=f"Error: {error}", foreground="#cc2222")
             return
-
         if result.found:
-            score_pct = int((result.score or 0) * 100)
-            self._lbl_result.config(
-                text=f"✓ FOUND  confidence={score_pct}%  center={result.center}",
-                foreground="#00cc55"
+            pct = int((result.score or 0) * 100)
+            self._lbl_capture_result.config(
+                text=f"✓ FOUND  {pct}%  center={result.center}",
+                foreground="#00cc55",
             )
-            # Show the test frame with match highlighted
             if frame is not None:
                 annotated = frame.copy()
                 if result.bbox:
                     x, y, w, h = result.bbox
                     cv2.rectangle(annotated, (x, y), (x+w, y+h), (0, 255, 128), 2)
-                    cx, cy = result.center
-                    cv2.circle(annotated, (cx, cy), 6, (0, 255, 128), -1)
+                    if result.center:
+                        cv2.circle(annotated, result.center, 6, (0, 255, 128), -1)
                 self._display_frame(annotated)
-
-            # Update status indicator in list to 'ok'
-            idx = self.required_detectors.index(self._selected_detector)
-            self._detector_list.itemconfig(idx, foreground="#00aa44")
-            text = self._detector_list.get(idx)
-            self._detector_list.delete(idx)
-            self._detector_list.insert(idx, text.replace("  ?  ", "  ✓  ").replace("  ✗  ", "  ✓  "))
-            self._detector_list.itemconfig(idx, foreground="#00aa44")
-            self._detector_list.selection_set(idx)
         else:
-            score_pct = int((result.score or 0) * 100)
-            self._lbl_result.config(
-                text=f"✗ NOT FOUND  best score={score_pct}%  (threshold ~82%)",
-                foreground="#cc2222"
+            pct = int((result.score or 0) * 100)
+            self._lbl_capture_result.config(
+                text=f"✗ NOT FOUND  best score={pct}%  (threshold ~82%)",
+                foreground="#cc2222",
             )
             if frame is not None:
                 self._display_frame(frame)
+        self._populate_detector_list()
+
+    # ---- Row action handlers ----
+
+    def _action_recapture(self) -> None:
+        """Switch to Capture tab with the selected detector pre-selected."""
+        sel = self._tree.selection()
+        if not sel:
+            return
+        det_name = sel[0]
+
+        # Find and switch to the Capture tab
+        nb = self.top.winfo_children()[0]   # the Notebook
+        nb.select(0)
+
+        # Select the detector in the listbox
+        if det_name in self.required_detectors:
+            idx = self.required_detectors.index(det_name)
+            self._detector_list.selection_clear(0, "end")
+            self._detector_list.selection_set(idx)
+            self._detector_list.see(idx)
+            self._on_detector_select(None)
+
+    def _action_toggle_scope(self) -> None:
+        """Toggle selected detector between shared and device-specific."""
+        sel = self._tree.selection()
+        if not sel:
+            return
+        det_name = sel[0]
+
+        if det_name == "eaten_by_name":
+            messagebox.showinfo(
+                "Not Applicable",
+                "eaten_by_name is always device-specific.",
+                parent=self.top,
+            )
+            return
+
+        current_scope = self._get_image_scope(det_name, self.device_cfg)
+        if current_scope == "missing":
+            messagebox.showinfo("No Image", "No image exists to toggle.", parent=self.top)
+            return
+
+        is_device_specific = det_name in self.device_cfg.device_image_overrides
+
+        if is_device_specific:
+            # Promote to shared: copy device image → shared dir
+            src = PROJECT_ROOT / "assets" / "devices" / self.device_cfg.serial / f"{det_name}.png"
+            dst_dir = PROJECT_ROOT / "assets" / "shared"
+            dst_dir.mkdir(parents=True, exist_ok=True)
+            dst = dst_dir / f"{det_name}.png"
+
+            if dst.exists():
+                if not messagebox.askyesno(
+                    "Overwrite Shared?",
+                    f"A shared image for '{det_name}' already exists.\nOverwrite it?",
+                    parent=self.top,
+                ):
+                    return
+
+            import shutil
+            shutil.copy2(str(src), str(dst))
+
+            # Update override list
+            devices = load_devices()
+            for dev in devices:
+                if dev.serial == self.device_cfg.serial:
+                    overrides = list(dev.device_image_overrides)
+                    if det_name in overrides:
+                        overrides.remove(det_name)
+                    dev.device_image_overrides = overrides
+                    self.device_cfg = dev
+                    break
+            save_devices(devices)
+
+            self.bank.invalidate(det_name, self.device_cfg.serial)
+            self.bank.invalidate(det_name, None)
+            self._lbl_manage_status.config(text=f"'{det_name}' promoted to shared.")
+
+        else:
+            # Demote to device-specific: copy shared → device dir
+            src = PROJECT_ROOT / "assets" / "shared" / f"{det_name}.png"
+            dst_dir = PROJECT_ROOT / "assets" / "devices" / self.device_cfg.serial
+            dst_dir.mkdir(parents=True, exist_ok=True)
+            dst = dst_dir / f"{det_name}.png"
+
+            import shutil
+            shutil.copy2(str(src), str(dst))
+
+            # Update override list
+            devices = load_devices()
+            for dev in devices:
+                if dev.serial == self.device_cfg.serial:
+                    overrides = list(dev.device_image_overrides)
+                    if det_name not in overrides:
+                        overrides.append(det_name)
+                    dev.device_image_overrides = overrides
+                    self.device_cfg = dev
+                    break
+            save_devices(devices)
+
+            self.bank.invalidate(det_name, self.device_cfg.serial)
+            self.bank.invalidate(det_name, None)
+            self._lbl_manage_status.config(
+                text=f"'{det_name}' demoted to device-specific for {self.device_cfg.nickname}."
+            )
+
+        self._refresh_manage_table()
+        self._populate_detector_list()
+
+    def _action_delete_image(self) -> None:
+        """Delete the image for the selected detector."""
+        sel = self._tree.selection()
+        if not sel:
+            return
+        det_name = sel[0]
+
+        if not messagebox.askyesno(
+            "Delete Image",
+            f"Delete the image for '{det_name}'?\nThis cannot be undone.",
+            parent=self.top,
+        ):
+            return
+
+        if det_name == "eaten_by_name":
+            path_str = self.device_cfg.eaten_by_name_image
+            if path_str:
+                p = PROJECT_ROOT / path_str
+                if p.exists():
+                    p.unlink()
+            devices = load_devices()
+            for dev in devices:
+                if dev.serial == self.device_cfg.serial:
+                    dev.eaten_by_name_image = ""
+                    self.device_cfg = dev
+                    break
+            save_devices(devices)
+        else:
+            is_device_specific = det_name in self.device_cfg.device_image_overrides
+            if is_device_specific:
+                p = PROJECT_ROOT / "assets" / "devices" / self.device_cfg.serial / f"{det_name}.png"
+            else:
+                p = PROJECT_ROOT / "assets" / "shared" / f"{det_name}.png"
+
+            if p.exists():
+                p.unlink()
+
+            # Remove from overrides if device-specific
+            if is_device_specific:
+                devices = load_devices()
+                for dev in devices:
+                    if dev.serial == self.device_cfg.serial:
+                        overrides = list(dev.device_image_overrides)
+                        if det_name in overrides:
+                            overrides.remove(det_name)
+                        dev.device_image_overrides = overrides
+                        self.device_cfg = dev
+                        break
+                save_devices(devices)
+
+            self.bank.invalidate(det_name, self.device_cfg.serial if is_device_specific else None)
+
+        # Clear saved test results for this detector
+        if det_name in self.test_results:
+            del self.test_results[det_name]
+            save_detector_results(self.test_results)
+
+        self._lbl_manage_status.config(text=f"'{det_name}' image deleted.")
+        self._refresh_manage_table()
+        self._populate_detector_list()
 
 
 # ---------------------------------------------------------------------------
-# Helper dialog: ask shared vs device-specific
+# Helper dialog: shared vs device-specific
 # ---------------------------------------------------------------------------
 
 class _AskSaveScope:
-    """Small modal dialog to ask whether to save shared or device-specific."""
-
     def __init__(self, parent, detector_name: str):
         self.result: Optional[str] = None
-
         self.top = tk.Toplevel(parent)
         self.top.title("Save Scope")
         self.top.grab_set()
@@ -614,8 +1263,10 @@ class _AskSaveScope:
 
         ttk.Label(
             self.top,
-            text="Shared — works across all devices (same screen resolution)\n"
-                 "Device-specific — only for this device (different resolution/screen)",
+            text=(
+                "Shared — same image works across all devices\n"
+                "Device-specific — only for this device (different resolution or UI)"
+            ),
             justify="left",
             padding=(16, 0, 16, 8),
             foreground="#555555",

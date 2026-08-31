@@ -1,0 +1,58 @@
+{
+  "auto_button_on": {
+    "19161FDEE005RY": {
+      "score": 1.0,
+      "passed": true,
+      "tested_at": "2026-08-30 18:21:45",
+      "image_scope": "shared"
+    }
+  },
+  "auto_button_off": {
+    "19161FDEE005RY": {
+      "score": 0.0,
+      "passed": false,
+      "tested_at": "2026-08-30 18:21:45",
+      "image_scope": "shared"
+    }
+  },
+  "end_run_button": {
+    "19161FDEE005RY": {
+      "score": 0.9983,
+      "passed": true,
+      "tested_at": "2026-08-30 18:21:46",
+      "image_scope": "shared"
+    }
+  },
+  "lobby_screen": {
+    "19161FDEE005RY": {
+      "score": 0.0,
+      "passed": false,
+      "tested_at": "2026-08-30 18:21:46",
+      "image_scope": "shared"
+    }
+  },
+  "death_screen": {
+    "19161FDEE005RY": {
+      "score": 0.0,
+      "passed": false,
+      "tested_at": "2026-08-30 18:21:46",
+      "image_scope": "shared"
+    }
+  },
+  "in_run_indicator": {
+    "19161FDEE005RY": {
+      "score": 1.0,
+      "passed": true,
+      "tested_at": "2026-08-30 18:21:46",
+      "image_scope": "shared"
+    }
+  },
+  "roblox_home_screen": {
+    "19161FDEE005RY": {
+      "score": 0.0,
+      "passed": false,
+      "tested_at": "2026-08-30 18:21:46",
+      "image_scope": "shared"
+    }
+  }
+}
