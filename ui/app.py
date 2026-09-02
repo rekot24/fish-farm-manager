@@ -21,6 +21,7 @@ import tkinter as tk
 from tkinter import ttk, scrolledtext
 from typing import List, Optional
 
+from bot import app_logger
 from bot.device_manager import DeviceManager
 from bot.config_manager import load_settings, load_devices, save_settings, save_devices
 from ui.device_panel import DevicePanel
@@ -49,10 +50,12 @@ class App:
         self._build_ui()
         self._rebuild_device_panels()
 
-        # Show startup warnings in log
+        # Show startup warnings in the log panel. Display only, not log() —
+        # main.py already wrote these to app_logger before this App existed;
+        # calling log() here would write them to the file a second time.
         if startup_warnings:
             for w in startup_warnings:
-                self.log(f"[WARNING] {w}")
+                self.display(f"[WARNING] {w}")
 
         # Start polling loops
         self._poll_status()
@@ -211,8 +214,21 @@ class App:
     # Log helpers
     # ------------------------------------------------------------------
 
-    def log(self, msg: str) -> None:
-        """Thread-safe log. Workers and manager call this."""
+    def log(self, msg: str, level: str = "INFO") -> None:
+        """
+        Thread-safe log. Workers and manager call this as their log_fn.
+        Writes to the persistent logger (file/console per settings) and
+        queues the message for display in the log panel.
+        """
+        app_logger.log(msg, level)
+        self._log_queue.put(msg)
+
+    def display(self, msg: str) -> None:
+        """
+        Queue a message for the log panel only — no write to app_logger.
+        Used to replay messages that were already logged before the UI
+        existed (see main.py), so they aren't written to the file twice.
+        """
         self._log_queue.put(msg)
 
     def _append_log(self, msg: str) -> None:
@@ -276,7 +292,7 @@ class App:
         if self.manager.trigger_end_run(serial):
             self.log(f"[UI] Manual end-run requested for {serial}")
         else:
-            self.log(f"[UI] Manual end-run failed: {serial} is not running")
+            self.log(f"[UI] Manual end-run failed: {serial} is not running", "WARNING")
 
     def _open_settings(self) -> None:
         """Open the global settings dialog."""

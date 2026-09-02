@@ -14,16 +14,18 @@ These don't block or get blocked by anything else. Good warm-up work, or fill-in
 
 ---
 
-## Phase 1 — Logging layer (Layer 7)
+## Phase 1 — Logging layer (Layer 7) ✅ Done
 
 **Why first (of the substantive work):** almost every other gap either produces log output or needs to route existing `print()`/ad hoc `self._log()` calls somewhere real. Building the debug layer, cleaning up stray `print()`s, and adding a dev/prod error mode all assume a logging layer already exists — building them before this would mean redoing the plumbing twice.
 
-- Add `logs/app.log` (rotating), `logs/errors.log` (errors and criticals only, always on).
-- Give the existing `_log()` calls real levels (DEBUG/INFO/WARNING/ERROR/CRITICAL) instead of one undifferentiated stream.
-- Route through one unified function per the standard's pattern — file + UI queue + console from a single call site — rather than three separate write paths.
-- Add the `logging` block to `Settings` (`enabled`, `level`, `log_to_file`, `log_to_console`, `max_file_size_mb`, `backup_count`).
+- [x] Add `logs/app.log` (rotating), `logs/errors.log` (errors and criticals only, always on).
+- [x] Give the existing `_log()` calls real levels (DEBUG/INFO/WARNING/ERROR/CRITICAL) instead of one undifferentiated stream.
+- [x] Route through one unified function per the standard's pattern — file + UI queue + console from a single call site — rather than three separate write paths.
+- [x] Add the `logging` block to `Settings` (`enabled`, `level`, `log_to_file`, `log_to_console`, `max_file_size_mb`, `backup_count`), plus a UI section in the Settings dialog to edit it live.
 
-This is the single highest-value item in the audit — it's also the one the standard's own motivating scenario ("something goes wrong at 3am while the farm runs unattended") points straight at, and it's the one thing currently missing that this app's actual use case (unattended overnight runs) most needs.
+Landed as [bot/app_logger.py](bot/app_logger.py) (new module, wraps stdlib `logging` with `RotatingFileHandler`) + `LoggingConfig` in `bot/config_manager.py`. `App.log()` is the fork point — one call writes to `app_logger` and queues the UI display. Every `self._log(...)` call site in `device_worker.py` and `device_manager.py` was reclassified with a real level, not just given a default. `DeviceManager.reload_settings()` calls `app_logger.configure()` again so a level/console/file toggle in the Settings dialog takes effect immediately, no restart — same live-reload pattern as `HealthConfig`/`DebugConfig`.
+
+This was the single highest-value item in the audit — it's also the one the standard's own motivating scenario ("something goes wrong at 3am while the farm runs unattended") points straight at, and it's the one thing that was missing that this app's actual use case (unattended overnight runs) most needed.
 
 ---
 
@@ -106,6 +108,20 @@ Add the standard's actual "Profile" concept: save the current set of feature-fla
 ## Phase 10 — Tests (future layer, not yet required by the standard)
 
 The standard itself defers this. Worth noting it becomes meaningfully cheaper *after* Phase 2 — `state_machine.resolve_state()`, `detector.find_in_frame()`, and the split config loaders are all pure-ish functions once separated out, and are the natural first candidates whenever testing does get picked up.
+
+---
+
+## Phase 11 — Per-device feature flag UI
+
+**Depends on:** Phase 6 (flags must be live in settings store) 
+and Phase 8 (profiles must exist to save/load from UI).
+
+- Add checkbox panel to each device in the UI
+- Groups: Detectors / Actions / Health responses / Timers
+- Each checkbox reads from and writes to settings store live — no restart
+- Health stats always visible regardless of checkbox state
+- [Save as Profile...] and [Load Profile...] buttons per device
+- Changing a checkbox takes effect on the next worker loop cycle
 
 ---
 

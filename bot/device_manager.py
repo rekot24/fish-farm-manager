@@ -18,12 +18,22 @@ import re
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from bot import app_logger
 from bot.config_manager import (
     DeviceConfig, Settings, load_profile,
 )
 from bot.device_worker import DeviceWorker
 from bot.farm_event_bus import FarmEventBus
 from detection.template_bank import TemplateBank
+
+# Project root (parent of bot/) — passed to app_logger.configure() so log
+# files land in <project root>/logs regardless of the process's cwd.
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _default_log_fn(msg: str, level: str = "INFO") -> None:
+    """Fallback log_fn when none is supplied — used mainly by tests/standalone use."""
+    print(f"[{level}] {msg}")
 
 
 class DeviceManager:
@@ -35,7 +45,7 @@ class DeviceManager:
     def __init__(self, settings: Settings, device_cfgs: List[DeviceConfig], log_fn=None):
         self.settings = settings
         self.device_cfgs = device_cfgs
-        self._log_fn = log_fn or print
+        self._log_fn = log_fn or _default_log_fn
 
         # Shared resources passed to all workers
         self.event_bus = FarmEventBus()
@@ -72,7 +82,7 @@ class DeviceManager:
                     serials.append(parts[0])
             return serials
         except Exception as e:
-            self._log(f"[DeviceManager] adb devices failed: {e}")
+            self._log(f"[DeviceManager] adb devices failed: {e}", "ERROR")
             return []
 
     # ------------------------------------------------------------------
@@ -93,7 +103,7 @@ class DeviceManager:
                 continue
 
             if dev_cfg.serial not in connected_serials:
-                self._log(f"[DeviceManager] Device not connected via ADB: {dev_cfg.nickname or dev_cfg.serial}")
+                self._log(f"[DeviceManager] Device not connected via ADB: {dev_cfg.nickname or dev_cfg.serial}", "WARNING")
                 continue
 
             self._start_worker(dev_cfg)
@@ -110,7 +120,7 @@ class DeviceManager:
         """Start a single device worker by serial. Returns True if started."""
         dev_cfg = self._find_cfg(serial)
         if not dev_cfg:
-            self._log(f"[DeviceManager] No config found for serial: {serial}")
+            self._log(f"[DeviceManager] No config found for serial: {serial}", "ERROR")
             return False
         return self._start_worker(dev_cfg)
 
@@ -130,11 +140,11 @@ class DeviceManager:
         existing = self._workers.get(dev_cfg.serial)
         if existing is not None:
             if existing.is_running():
-                self._log(f"[DeviceManager] Worker already running for {dev_cfg.serial}")
+                self._log(f"[DeviceManager] Worker already running for {dev_cfg.serial}", "WARNING")
                 return False
             else:
                 # Stale worker — clean it up before spawning a new one
-                self._log(f"[DeviceManager] Pruning stale worker for {dev_cfg.serial}")
+                self._log(f"[DeviceManager] Pruning stale worker for {dev_cfg.serial}", "WARNING")
                 existing.stop()
                 self.event_bus.unregister(dev_cfg.serial)
                 del self._workers[dev_cfg.serial]
@@ -143,13 +153,14 @@ class DeviceManager:
         try:
             profile_cfg = load_profile(dev_cfg.profile)
         except FileNotFoundError as e:
-            self._log(f"[DeviceManager] Profile not found for {dev_cfg.nickname}: {e}")
+            self._log(f"[DeviceManager] Profile not found for {dev_cfg.nickname}: {e}", "ERROR")
             return False
 
         if profile_cfg.status == "stub":
             self._log(
                 f"[DeviceManager] Profile '{dev_cfg.profile}' is a stub. "
-                f"Skipping {dev_cfg.nickname or dev_cfg.serial}."
+                f"Skipping {dev_cfg.nickname or dev_cfg.serial}.",
+                "WARNING",
             )
             return False
 
@@ -270,10 +281,17 @@ class DeviceManager:
                 worker.cfg = cfg
 
     def reload_settings(self, new_settings: Settings) -> None:
-        """Update global settings at runtime."""
+        """
+        Update global settings at runtime.
+        Also reconfigures the persistent logger from the new logging block
+        so a change made in the Settings dialog (level, log_to_console, etc.)
+        takes effect immediately — no restart, same pattern as every other
+        setting.
+        """
         self.settings = new_settings
         for worker in self._workers.values():
             worker.settings = new_settings
+        app_logger.configure(new_settings.logging, _PROJECT_ROOT)
 
     # ------------------------------------------------------------------
     # Helpers
@@ -285,5 +303,5 @@ class DeviceManager:
                 return cfg
         return None
 
-    def _log(self, msg: str) -> None:
-        self._log_fn(msg)
+    def _log(self, msg: str, level: str = "INFO") -> None:
+        self._log_fn(msg, level)

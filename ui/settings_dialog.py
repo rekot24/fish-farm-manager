@@ -11,7 +11,7 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk
 
-from bot.config_manager import Settings, HealthConfig, DebugConfig
+from bot.config_manager import Settings, HealthConfig, DebugConfig, LoggingConfig
 
 
 class SettingsDialog:
@@ -45,6 +45,14 @@ class SettingsDialog:
         self._save_failed = tk.BooleanVar(value=d.save_failed_captures)
         self._log_states = tk.BooleanVar(value=d.log_state_changes)
         self._screenshot_dir = tk.StringVar(value=d.screenshot_dir)
+
+        lg = settings.logging
+        self._log_enabled = tk.BooleanVar(value=lg.enabled)
+        self._log_level = tk.StringVar(value=lg.level)
+        self._log_to_file = tk.BooleanVar(value=lg.log_to_file)
+        self._log_to_console = tk.BooleanVar(value=lg.log_to_console)
+        self._log_max_mb = tk.IntVar(value=lg.max_file_size_mb)
+        self._log_backups = tk.IntVar(value=lg.backup_count)
 
         self._build()
 
@@ -109,6 +117,28 @@ class SettingsDialog:
             f, variable=self._log_states))
         row("Screenshot Directory:", ttk.Entry, textvariable=self._screenshot_dir)
 
+        # ---- Logging ----
+        # Persistent on-disk record (logs/app.log, logs/errors.log) — distinct
+        # from Debug above, which is live "what's happening right now" output.
+        section("Logging")
+        row("Enabled:", lambda f, **kw: ttk.Checkbutton(
+            f, variable=self._log_enabled))
+        row("Minimum Level:", lambda f, **kw: ttk.Combobox(
+            f, textvariable=self._log_level,
+            values=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+            state="readonly", width=10))
+        row("Log to File:", lambda f, **kw: ttk.Checkbutton(
+            f, variable=self._log_to_file))
+        row("Log to Console:", lambda f, **kw: ttk.Checkbutton(
+            f, variable=self._log_to_console))
+        row("Max File Size (MB):", lambda f, **kw: ttk.Spinbox(
+            f, from_=1, to=100, textvariable=self._log_max_mb, width=6))
+        row("Backup Count:", lambda f, **kw: ttk.Spinbox(
+            f, from_=0, to=20, textvariable=self._log_backups, width=6))
+        ttk.Label(outer,
+                  text="errors.log always records ERROR/CRITICAL regardless of these settings.",
+                  foreground="#888888", justify="left").pack(anchor="w", pady=(2, 0))
+
         # ---- Buttons ----
         ttk.Separator(outer, orient="horizontal").pack(fill="x", pady=(12, 8))
         btn_row = ttk.Frame(outer)
@@ -135,6 +165,14 @@ class SettingsDialog:
                 save_failed_captures=self._save_failed.get(),
                 log_state_changes=self._log_states.get(),
                 screenshot_dir=self._screenshot_dir.get().strip(),
+            ),
+            logging=LoggingConfig(
+                enabled=self._log_enabled.get(),
+                level=self._log_level.get(),
+                log_to_file=self._log_to_file.get(),
+                log_to_console=self._log_to_console.get(),
+                max_file_size_mb=self._log_max_mb.get(),
+                backup_count=self._log_backups.get(),
             ),
         )
         self.saved = True

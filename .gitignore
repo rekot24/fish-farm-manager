@@ -15,6 +15,9 @@ config/settings.json
 # Debug output
 debug_shots/
 
+# Persistent logs (Layer 7) — local session record, not something to commit
+logs/
+
 # OS junk
 .DS_Store
 Thumbs.db

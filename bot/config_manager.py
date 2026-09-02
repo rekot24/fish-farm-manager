@@ -67,6 +67,23 @@ class DebugConfig:
 
 
 @dataclass
+class LoggingConfig:
+    """
+    Persistent logging (Layer 7) — distinct from DebugConfig above, which is
+    for live "what is the app doing right now" output. This controls the
+    durable on-disk record: logs/app.log (rotating) and logs/errors.log
+    (errors and criticals only, always written regardless of these settings —
+    see bot/app_logger.py for why).
+    """
+    enabled: bool = True
+    level: str = "INFO"        # minimum level written to app.log / console: DEBUG, INFO, WARNING, ERROR, CRITICAL
+    log_to_file: bool = True
+    log_to_console: bool = True
+    max_file_size_mb: int = 10
+    backup_count: int = 3      # how many rotated app.log files to keep
+
+
+@dataclass
 class Settings:
     adb_path: str = "adb"
     scan_interval_ms: int = 800
@@ -75,6 +92,7 @@ class Settings:
     capture_backend_default: str = "scrcpy"   # "scrcpy" or "adb"
     health: HealthConfig = field(default_factory=HealthConfig)
     debug: DebugConfig = field(default_factory=DebugConfig)
+    logging: LoggingConfig = field(default_factory=LoggingConfig)
 
 
 # ---------------------------------------------------------------------------
@@ -160,6 +178,7 @@ def load_settings() -> Settings:
 
     health_data = data.get("health", {})
     debug_data = data.get("debug", {})
+    logging_data = data.get("logging", {})
 
     return Settings(
         adb_path=data.get("adb_path", "adb"),
@@ -179,6 +198,14 @@ def load_settings() -> Settings:
             save_failed_captures=debug_data.get("save_failed_captures", True),
             log_state_changes=debug_data.get("log_state_changes", True),
             screenshot_dir=debug_data.get("screenshot_dir", "debug_shots"),
+        ),
+        logging=LoggingConfig(
+            enabled=logging_data.get("enabled", True),
+            level=logging_data.get("level", "INFO"),
+            log_to_file=logging_data.get("log_to_file", True),
+            log_to_console=logging_data.get("log_to_console", True),
+            max_file_size_mb=logging_data.get("max_file_size_mb", 10),
+            backup_count=logging_data.get("backup_count", 3),
         ),
     )
 
@@ -206,6 +233,14 @@ def save_settings(settings: Settings) -> None:
             "save_failed_captures": settings.debug.save_failed_captures,
             "log_state_changes": settings.debug.log_state_changes,
             "screenshot_dir": settings.debug.screenshot_dir,
+        },
+        "logging": {
+            "enabled": settings.logging.enabled,
+            "level": settings.logging.level,
+            "log_to_file": settings.logging.log_to_file,
+            "log_to_console": settings.logging.log_to_console,
+            "max_file_size_mb": settings.logging.max_file_size_mb,
+            "backup_count": settings.logging.backup_count,
         },
     }
 

@@ -42,6 +42,11 @@ from detection.detector import run_all_detectors, find_by_path
 from detection.template_bank import TemplateBank
 
 
+def _default_log_fn(msg: str, level: str = "INFO") -> None:
+    """Fallback log_fn when none is supplied — used mainly by tests/standalone use."""
+    print(f"[{level}] {msg}")
+
+
 class DeviceWorker:
     """
     Manages one device's bot loop in a background thread.
@@ -70,7 +75,7 @@ class DeviceWorker:
         self.bank = template_bank
         self.all_devices = all_device_cfgs
 
-        self._log_fn = log_fn or print
+        self._log_fn = log_fn or _default_log_fn
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
 
@@ -165,7 +170,7 @@ class DeviceWorker:
             adb_path=self.settings.adb_path,
         )
         if not self._backend.connect():
-            self._log(f"[{self._name()}] Capture backend failed to connect. Worker exiting.")
+            self._log(f"[{self._name()}] Capture backend failed to connect. Worker exiting.", "ERROR")
             return
 
         while not self._stop_event.is_set():
@@ -174,7 +179,7 @@ class DeviceWorker:
             try:
                 self._loop_iteration()
             except Exception as e:
-                self._log(f"[{self._name()}] Unhandled error in loop: {type(e).__name__}: {e}")
+                self._log(f"[{self._name()}] Unhandled error in loop: {type(e).__name__}: {e}", "ERROR")
 
             elapsed = time.time() - t0
             target_s = self.cfg.scan_interval_ms / 1000.0
@@ -197,7 +202,7 @@ class DeviceWorker:
 
         if not health.adb_connected:
             self._set_state(STATE_ADB_LOST)
-            self._log(f"[{self._name()}] ADB disconnected, attempting reconnect...")
+            self._log(f"[{self._name()}] ADB disconnected, attempting reconnect...", "WARNING")
             self._health_monitor.attempt_adb_reconnect()
             return
 
@@ -215,7 +220,7 @@ class DeviceWorker:
         # ---- 3. Capture frame ----
         frame = self._backend.get_frame()
         if frame is None:
-            self._log(f"[{self._name()}] Frame capture returned None, skipping iteration")
+            self._log(f"[{self._name()}] Frame capture returned None, skipping iteration", "WARNING")
             return
 
         # ---- 4. Run detectors ----
@@ -291,9 +296,9 @@ class DeviceWorker:
                 self._log(f"[{self._name()}] Auto-farm double-tap sent at {target}")
                 self._last_auto_reset = time.time()
             else:
-                self._log(f"[{self._name()}] Auto-farm reset: could not resolve click target")
+                self._log(f"[{self._name()}] Auto-farm reset: could not resolve click target", "WARNING")
         else:
-            self._log(f"[{self._name()}] Auto-farm reset: button not found, will retry next cycle")
+            self._log(f"[{self._name()}] Auto-farm reset: button not found, will retry next cycle", "WARNING")
             # Do NOT advance the timer — retry next scan
 
     def _check_end_run_reset(self, results: dict) -> None:
@@ -332,13 +337,13 @@ class DeviceWorker:
 
         end_run_result = results.get("end_run_button")
         if not end_run_result or not end_run_result.found:
-            self._log(f"[{self._name()}] End-run button not found, will retry next cycle")
+            self._log(f"[{self._name()}] End-run button not found, will retry next cycle", "WARNING")
             return  # Do NOT advance timer — retry next scan
 
         offset = self._get_click_offset("end_run_button")
         target = end_run_result.click_target(offset)
         if not target:
-            self._log(f"[{self._name()}] End-run: could not resolve click target")
+            self._log(f"[{self._name()}] End-run: could not resolve click target", "WARNING")
             return
 
         actions.tap(self.cfg.serial, target[0], target[1],
@@ -440,7 +445,7 @@ class DeviceWorker:
                         f"[{self._name()}] Revived. Revives remaining: {self.revives_remaining}"
                     )
             else:
-                self._log(f"[{self._name()}] Revive button not found")
+                self._log(f"[{self._name()}] Revive button not found", "WARNING")
         else:
             # Revives exhausted (or not enabled) — move to private
             self._log(
@@ -455,9 +460,10 @@ class DeviceWorker:
             success = actions.join_server_by_link(
                 self.cfg.serial, link, adb_path=self.settings.adb_path
             )
-            self._log(f"[{self._name()}] Moving to private server, success={success}")
+            self._log(f"[{self._name()}] Moving to private server, success={success}",
+                       "INFO" if success else "ERROR")
         else:
-            self._log(f"[{self._name()}] No private_server_link set — cannot move to private")
+            self._log(f"[{self._name()}] No private_server_link set — cannot move to private", "WARNING")
 
         if broadcast:
             self.event_bus.broadcast(
@@ -474,9 +480,10 @@ class DeviceWorker:
             success = actions.join_server_by_link(
                 self.cfg.serial, link, adb_path=self.settings.adb_path
             )
-            self._log(f"[{self._name()}] join_server_by_link success={success}")
+            self._log(f"[{self._name()}] join_server_by_link success={success}",
+                       "INFO" if success else "ERROR")
         else:
-            self._log(f"[{self._name()}] No private_server_link set — cannot rejoin")
+            self._log(f"[{self._name()}] No private_server_link set — cannot rejoin", "WARNING")
 
     def _check_crash_timeout(self) -> None:
         """If UNKNOWN state persists too long, treat as crashed and recover."""
@@ -486,7 +493,7 @@ class DeviceWorker:
 
         elapsed = time.time() - self._unknown_since
         if elapsed > self._max_unknown_s:
-            self._log(f"[{self._name()}] UNKNOWN for {elapsed:.0f}s — treating as crash")
+            self._log(f"[{self._name()}] UNKNOWN for {elapsed:.0f}s — treating as crash", "ERROR")
             self._unknown_since = None
             self._recover_from_crash()
 
@@ -497,13 +504,13 @@ class DeviceWorker:
     def _recover_from_crash(self) -> None:
         """Full crash recovery: force-stop Roblox and relaunch."""
         self._set_state(STATE_CRASHED)
-        self._log(f"[{self._name()}] Crash recovery starting")
+        self._log(f"[{self._name()}] Crash recovery starting", "WARNING")
 
         actions.force_stop_roblox(self.cfg.serial, adb_path=self.settings.adb_path)
         self._stop_event.wait(timeout=3.0)
 
         launched = actions.launch_roblox(self.cfg.serial, adb_path=self.settings.adb_path)
-        self._log(f"[{self._name()}] Roblox launched: {launched}")
+        self._log(f"[{self._name()}] Roblox launched: {launched}", "INFO" if launched else "ERROR")
         # Next loop iterations handle detecting LOBBY and rejoining
 
     # ------------------------------------------------------------------
@@ -560,7 +567,7 @@ class DeviceWorker:
             cv2.imwrite(str(filename), frame)
             self._log(f"[{self._name()}] Death screenshot saved: {filename}")
         except Exception as e:
-            self._log(f"[{self._name()}] Failed to save death screenshot: {e}")
+            self._log(f"[{self._name()}] Failed to save death screenshot: {e}", "ERROR")
 
     # ------------------------------------------------------------------
     # Event bus handling
@@ -595,7 +602,7 @@ class DeviceWorker:
     def _enter_battery_sleep(self) -> None:
         """Device battery is critically low. Close Roblox and sleep."""
         self._set_state(STATE_BATTERY_SLEEP)
-        self._log(f"[{self._name()}] Battery critical ({self.health.battery_percent}%), entering sleep")
+        self._log(f"[{self._name()}] Battery critical ({self.health.battery_percent}%), entering sleep", "WARNING")
 
         actions.force_stop_roblox(self.cfg.serial, adb_path=self.settings.adb_path)
         self._stop_event.wait(timeout=1.0)
@@ -617,7 +624,7 @@ class DeviceWorker:
     def _enter_temp_pause(self) -> None:
         """Device is too hot. Pause and let it cool."""
         self._set_state(STATE_TEMP_PAUSE)
-        self._log(f"[{self._name()}] Temperature critical ({self.health.temperature_celsius:.1f}°C), pausing")
+        self._log(f"[{self._name()}] Temperature critical ({self.health.temperature_celsius:.1f}°C), pausing", "WARNING")
         actions.sleep_device(self.cfg.serial, adb_path=self.settings.adb_path)
 
         while not self._stop_event.is_set():
@@ -652,6 +659,6 @@ class DeviceWorker:
         """Short display name for log lines."""
         return self.cfg.nickname or self.cfg.serial[:8]
 
-    def _log(self, msg: str) -> None:
+    def _log(self, msg: str, level: str = "INFO") -> None:
         """Send a log message through the log function (UI queue or print)."""
-        self._log_fn(msg)
+        self._log_fn(msg, level)

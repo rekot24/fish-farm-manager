@@ -60,21 +60,26 @@ If asked to do something that conflicts with those standards, flag it before pro
 - [2026-09-02] Per-device feature flags chosen over profile-only control — user must be able to see and toggle every behavior per device from the UI without touching code or config files
 - [2026-09-02] Health stats always displayed regardless of feature flags — visibility is non-negotiable even when health actions are disabled
 - [2026-09-02] Settings store reads on every loop cycle — never cached at startup; changing a setting takes effect immediately without restart
+- [2026-09-02] Persistent logging (Layer 7) built on stdlib `logging` with `RotatingFileHandler`, wrapped in one unified `app_logger.log(msg, level)` call site, rather than hand-rolled file writing — reuses proven rotation/formatting instead of reinventing it
+- [2026-09-02] `logs/errors.log` always records ERROR/CRITICAL regardless of the `logging.enabled` master switch — a failure record must not depend on the same switch that silences routine noise
+- [2026-09-02] UI-triggered actions on a worker go through public `DeviceManager` methods (`is_device_running`, `trigger_end_run`) backed by public `DeviceWorker` methods (`request_manual_end_run`) — the UI must never call a worker's private methods or reach into `DeviceManager`'s private worker dict, per the standard's non-negotiable UI rule
 
 ## Tried and rejected
 - [2026-08-27] Galaxy XCover Pro — GPU (Mali-G72) too weak for Roblox rendering; retired to shelf — do not re-add to active farm
 - Do not attempt to make Samsung Knox devices behave like Pixels via ADB — Knox intentionally blocks these commands; the keep-alive tap is the correct workaround
+- [2026-09-02] A `ui_sink` callback-registration layer in `app_logger.py`, for forwarding log calls to the UI — added, then removed same session. Every log call already flows through `App.log()`, which handles the file logger and the UI queue directly; the extra indirection had no second caller. Don't re-add without an actual need for something other than `App.log()` to reach the UI.
 
 ## Planned work (see ROADMAP.md for full list)
 - Per-device feature flag UI — checkboxes for every detector, action, and health response per device
 - Profile system — save/load named sets of feature flags per device
-- Separate debug and logging layers — currently combined; needs to be split per dev-standards Layer 7
-- constants.py — magic numbers exist in codebase (screen_off_timeout, thresholds); need to be extracted
+- Split `config_manager.py` into settings/devices/profiles (ROADMAP Phase 2)
+- No magic numbers — extract timeouts, retry delays, and layout constants into named values (ROADMAP Phase 3; standing instruction 5 also calls for a dedicated `config/constants.py`, not yet created)
+- Debug layer master switch + per-category flags (ROADMAP Phase 4)
 - CLAUDE.md standing instructions compliance audit — codebase predates these standards
 
 ## Current state
-- Working: ADB connection, screenshot capture, template detection, state machine, basic actions, health monitoring, UI display
-- In progress: Per-device feature flag system, profile save/load
+- Working: ADB connection, screenshot capture, template detection, state machine, basic actions, health monitoring, UI display, persistent logging (rotating `logs/app.log` + always-on `logs/errors.log`, real per-message levels)
+- In progress: Per-device feature flag system, profile save/load; working through ROADMAP.md's standards-compliance phases (Phase 0 and Phase 1 done, Phase 2 — splitting `config_manager.py` — is next)
 - Known broken: Detection loop reliability — multiple behaviors running simultaneously without individual toggles makes isolation and debugging difficult
 
 ## Session log
@@ -85,6 +90,12 @@ If asked to do something that conflicts with those standards, flag it before pro
 - Decision made: per-device feature flags with live checkbox UI is the correct architecture
 - Decision made: profiles are named snapshots of feature flag state, not the source of defaults
 - CLAUDE.md created with full project context
+
+### 2026-09-02 — Phase 0 + Phase 1 (ROADMAP.md)
+- Phase 0 (quick wins): added README.md; fixed the UI→worker boundary violation flagged in the audit (`DeviceManager.is_device_running()` / `trigger_end_run()` added, backed by a new `DeviceWorker.request_manual_end_run()`). Fixing it surfaced a live bug: the old direct call `worker._execute_end_run()` passed no `results` argument to a method that required one, so the manual "End Run" button threw `TypeError` on every click — fixed as part of the same change.
+- Phase 1 (Layer 7 logging): built the persistent logging layer end to end. New `bot/app_logger.py` (unified `log(msg, level)` call site, stdlib `logging` + `RotatingFileHandler`); new `LoggingConfig` on `Settings`; `logs/app.log` (rotating) and `logs/errors.log` (errors/criticals only, always on) confirmed with a functional smoke test (level filtering, always-on errors.log even with `enabled=False`). All ~60 existing `_log()` call sites in `device_worker.py` and `device_manager.py` reclassified with real levels — not left at a default. Settings dialog got a new Logging section; `DeviceManager.reload_settings()` reconfigures the logger live (no restart). `logs/` added to `.gitignore`.
+- Audit follow-up: user flagged a "no magic numbers" rule ahead of it landing in `app-framework.md` — audited the codebase against it, found the same ADB timeout literal duplicated independently 8+ times plus several other unnamed timeouts/thresholds/layout constants; recorded as AUDIT.md section 4 and inserted as ROADMAP.md Phase 3.
+- Modified: bot/device_worker.py, bot/device_manager.py, bot/config_manager.py, main.py, ui/app.py, ui/settings_dialog.py, .gitignore, AUDIT.md, ROADMAP.md. Added: README.md, bot/app_logger.py.
 
 ---
 

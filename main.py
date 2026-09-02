@@ -13,10 +13,14 @@ Usage:
 
 import sys
 import tkinter as tk
+from pathlib import Path
 
+from bot import app_logger
 from bot.config_manager import load_settings, load_devices, validate_settings, validate_devices
 from bot.device_manager import DeviceManager
 from ui.app import App
+
+PROJECT_ROOT = Path(__file__).resolve().parent
 
 
 def main():
@@ -28,22 +32,26 @@ def main():
         print(f"[FATAL] Failed to load configuration: {e}")
         sys.exit(1)
 
+    # ---- Start the persistent logger before anything else logs ----
+    app_logger.configure(settings.logging, PROJECT_ROOT)
+
     # ---- Validate (warnings only — never fatal at startup) ----
     setting_warnings = validate_settings(settings)
     device_warnings = validate_devices(devices)
     all_warnings = setting_warnings + device_warnings
 
     for w in all_warnings:
-        print(f"[WARNING] {w}")
+        app_logger.log(w, level="WARNING")
 
     # ---- Start the device manager (core) ----
     # The log function is a placeholder here — replaced with the UI queue
-    # once the App is constructed. We pass a lambda that updates in place.
+    # once the App is constructed. Every call already reaches app_logger
+    # (so it's on disk immediately); only the UI display is deferred.
     log_buffer = []
 
-    def early_log(msg: str):
+    def early_log(msg: str, level: str = "INFO"):
         log_buffer.append(msg)
-        print(msg)
+        app_logger.log(msg, level)
 
     manager = DeviceManager(
         settings=settings,
@@ -57,9 +65,11 @@ def main():
 
     # Wire the manager's log function to the UI queue
     manager._log_fn = app.log
-    # Replay any early log messages into the UI
+    # Replay early log messages into the UI display only — they were
+    # already written to app_logger above, so app.log() here would
+    # double-write them to the file/console.
     for msg in log_buffer:
-        app.log(msg)
+        app.display(msg)
 
     # Start all enabled device workers
     # manager.start_all()
