@@ -161,6 +161,17 @@ class ImageCaptureTool:
     def _on_tab_changed(self, event) -> None:
         nb = event.widget
         if nb.index(nb.select()) == 1:
+            # Check if devices.json has new devices since the tool opened
+            fresh = load_devices()
+            fresh_serials = [d.serial for d in fresh]
+            if fresh_serials != self._known_device_serials:
+                self.all_device_cfgs = fresh
+                self._build_device_checkboxes()
+                # Rebuild tree columns to match new device list
+                for widget in self._tree.master.winfo_children():
+                    widget.destroy()
+                self._build_manage_tree(self._tree.master)
+                self._tree.bind("<<TreeviewSelect>>", self._on_tree_select)
             self._refresh_manage_table()
 
     # ==================================================================
@@ -629,9 +640,6 @@ class ImageCaptureTool:
 
         self._refresh_manage_table()
 
-        # Start background ADB poll — only rebuilds checkboxes if device list changed
-        self._start_device_poll()
-
     def _build_device_checkboxes(self) -> None:
         """Build or rebuild the device checkbox row from current all_device_cfgs."""
         for widget in self._device_checkbox_frame.winfo_children():
@@ -734,55 +742,6 @@ class ImageCaptureTool:
         self._tree.tag_configure("missing",  foreground="#cc2222")
         self._tree.tag_configure("untested", foreground="#aa8800")
         self._tree.tag_configure("failed",   foreground="#cc2222")
-
-    def _start_device_poll(self) -> None:
-        """
-        Background thread: polls ADB every 5s.
-        Only triggers a UI rebuild if the device list actually changed —
-        either new serials appeared (new device added to devices.json)
-        or a previously known serial is now missing.
-        """
-        def poll():
-            while True:
-                try:
-                    # Reload devices.json to pick up newly added devices
-                    fresh = load_devices()
-                    fresh_serials = [d.serial for d in fresh]
-
-                    if fresh_serials != self._known_device_serials:
-                        # Device list changed — rebuild checkboxes on UI thread
-                        self.all_device_cfgs = fresh
-                        self.top.after(0, self._on_device_list_changed)
-                except Exception:
-                    pass
-
-                # Use the window's after() to check if the window is still alive
-                # before sleeping — if it's been destroyed, stop polling
-                try:
-                    self.top.winfo_exists()
-                except Exception:
-                    return
-
-                import time
-                time.sleep(5)
-
-        threading.Thread(target=poll, daemon=True).start()
-
-    def _on_device_list_changed(self) -> None:
-        """Called on the UI thread when the device list has changed."""
-        try:
-            if not self.top.winfo_exists():
-                return
-        except Exception:
-            return
-
-        self._build_device_checkboxes()
-        # Rebuild the tree with new device columns
-        for widget in self._tree.master.winfo_children():
-            widget.destroy()
-        self._build_manage_tree(self._tree.master)
-        self._tree.bind("<<TreeviewSelect>>", self._on_tree_select)
-        self._refresh_manage_table()
 
     def _refresh_manage_table(self) -> None:
         """Rebuild the manage table from current disk state and saved results."""
