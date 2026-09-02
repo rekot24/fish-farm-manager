@@ -264,8 +264,7 @@ class App:
 
     def _toggle_device(self, serial: str) -> None:
         """Start or stop a single device worker."""
-        worker = self.manager._workers.get(serial)
-        if worker and worker.is_running():
+        if self.manager.is_device_running(serial):
             self.manager.stop_device(serial)
             self.log(f"[UI] Stopped {serial}")
         else:
@@ -274,10 +273,10 @@ class App:
 
     def _manual_end_run(self, serial: str) -> None:
         """Manually trigger an end-run on a device."""
-        worker = self.manager._workers.get(serial)
-        if worker:
-            self.log(f"[UI] Manual end-run triggered for {serial}")
-            worker._execute_end_run()
+        if self.manager.trigger_end_run(serial):
+            self.log(f"[UI] Manual end-run requested for {serial}")
+        else:
+            self.log(f"[UI] Manual end-run failed: {serial} is not running")
 
     def _open_settings(self) -> None:
         """Open the global settings dialog."""

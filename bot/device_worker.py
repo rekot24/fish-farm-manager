@@ -135,6 +135,19 @@ class DeviceWorker:
     def is_running(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
 
+    def request_manual_end_run(self) -> None:
+        """
+        Request an end-run on this device's next scan iteration.
+
+        Public entry point for a UI-triggered manual end-run. Reuses the same
+        mechanism as an incoming EVENT_FORCE_END_RUN (expire the timer so the
+        next loop iteration fires it) rather than calling _execute_end_run()
+        directly — that method needs a fresh detector `results` dict that
+        only exists inside the loop, so calling it from outside the loop
+        with no results would fail.
+        """
+        self._last_end_run_reset = 0
+
     def get_health(self) -> HealthStatus:
         """Thread-safe health status read for the UI."""
         with self._health_lock:

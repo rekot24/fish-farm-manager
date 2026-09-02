@@ -215,6 +215,25 @@ class DeviceManager:
                 })
         return statuses
 
+    def is_device_running(self, serial: str) -> bool:
+        """Return True if a worker exists for this serial and its thread is alive."""
+        worker = self._workers.get(serial)
+        return worker is not None and worker.is_running()
+
+    def trigger_end_run(self, serial: str) -> bool:
+        """
+        Manually request an end-run on a running device (UI 'End Run' button).
+
+        Delegates to the worker's public request_manual_end_run() rather than
+        letting callers reach into worker internals. Returns True if a running
+        worker was found and the request was made, False otherwise.
+        """
+        worker = self._workers.get(serial)
+        if not worker or not worker.is_running():
+            return False
+        worker.request_manual_end_run()
+        return True
+
     def get_timer_info(self, serial: str) -> Optional[dict]:
         """Return timer countdown info for a device (for UI display)."""
         worker = self._workers.get(serial)
