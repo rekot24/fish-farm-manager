@@ -22,6 +22,7 @@ import numpy as np
 import cv2
 
 from capture.base import CaptureBackend
+from config.constants import ADB_QUICK_TIMEOUT_S, ADB_SCREENCAP_TIMEOUT_S
 
 
 class ADBScreencapBackend(CaptureBackend):
@@ -31,7 +32,7 @@ class ADBScreencapBackend(CaptureBackend):
     Use as fallback when scrcpy socket is not available.
     """
 
-    def __init__(self, serial: str, adb_path: str = "adb", timeout_s: float = 8.0):
+    def __init__(self, serial: str, adb_path: str = "adb", timeout_s: float = ADB_SCREENCAP_TIMEOUT_S):
         """
         Args:
             serial    : ADB device serial
@@ -51,7 +52,7 @@ class ADBScreencapBackend(CaptureBackend):
             result = subprocess.run(
                 [self.adb_path, "-s", self.serial, "get-state"],
                 capture_output=True,
-                timeout=5,
+                timeout=ADB_QUICK_TIMEOUT_S,
                 text=True,
             )
             if result.returncode == 0 and "device" in result.stdout:

@@ -42,18 +42,22 @@ Landed with one addition beyond the original plan: a `config/paths.py` holding t
 
 ---
 
-## Phase 3 — No magic numbers
+## Phase 3 — No magic numbers ✅ Done
 
 **Depends on:** Phase 2. Most of what needs naming here isn't just a code constant — it's the same *kind* of value `HealthConfig` already extracted correctly for battery/temp thresholds (operational tuning knobs: timeouts, settle delays, retry counts). Doing this once the config split exists means these land as new fields on the right small file instead of more clutter on a monolith, and it means Phase 4's debug layer and Phase 9's health-check logging report on values that already have names instead of raw numbers.
 
-- **Consolidate the duplicated ADB timeout.** One shared constant (or a `Settings.adb_timeout_s` field) instead of the `10.0`/`10`/`5.0`/`15.0`/`8.0` literals currently copy-pasted across `device_manager.py`, `actions.py`, `health_monitor.py`, `adb_screencap.py`, `add_device_dialog.py`, `coordinate_finder.py`, and `image_capture_tool.py`.
-- **Name the device-recovery/settle delays in `device_worker.py`** (the `wait(timeout=...)` calls around crash recovery, battery sleep, and temp pause) — promote them into `HealthConfig` alongside the thresholds they support, since they're the same category of tuning value.
-- **Name `_max_unknown_s`, the thermal-throttle `2.0` multiplier, and the `0.05` sleep floor** as proper constants (module-level or `HealthConfig` fields, as appropriate) instead of bare literals in `device_worker.py`.
-- **Dedupe the `0.82` template-confidence default** in `detection/detector.py` (four call sites) down to one reference to `Settings.template_confidence_default`.
-- **Name the UI resize math** in `ui/app.py`'s `_resize_to_fit` (`10` device cap, `78` px/row, `220`, `60`) — at minimum as named constants near `DevicePanel`, ideally tied to `DevicePanel`'s actual measured height so the two can't drift apart silently.
-- **Name the health-monitor temperature-parsing heuristics** (`1000` millidegree cutoff, `120` sanity bound) in `health_monitor.py`.
+- [x] **Consolidate the duplicated ADB timeout.** Landed as three tiers, not one collapsed value — `ADB_QUICK_TIMEOUT_S`/`ADB_DEFAULT_TIMEOUT_S`/`ADB_LAUNCH_TIMEOUT_S` (plus `ADB_SCREENCAP_TIMEOUT_S`, `ADB_SCREENCAP_BATCH_TIMEOUT_S`, `ADB_RECONNECT_SETTLE_S`) in `config/constants.py`, live-wired via a new `AdbConfig` on `Settings` wherever a call site already holds a live settings reference; used as named static defaults (not settings-store-threaded) in `bot/actions.py` and the three standalone tool dialogs — see AUDIT.md §4 for why that boundary was drawn there.
+- [x] **Name the device-recovery/settle delays in `device_worker.py`.** Landed on `HealthConfig` as planned: `crash_detect_after_s`, `crash_recovery_settle_s`, `battery_sleep_settle_s`, `battery_sleep_poll_s`, `wake_settle_s`, `temp_pause_poll_s` — read live from `self.settings.health.*` at each use site.
+- [x] **Name `_max_unknown_s`, the thermal-throttle `2.0` multiplier, and the `0.05` sleep floor.** `_max_unknown_s` removed entirely (replaced by the live `crash_detect_after_s` read above); `thermal_throttle_multiplier` is a live `HealthConfig` field; the sleep floor is `LOOP_SLEEP_FLOOR_S`, `[INTERNAL]` in `config/constants.py`.
+- [x] **Dedupe the `0.82` template-confidence default.** All five call sites (four in `detector.py` + `Settings.template_confidence_default`) now reference one `DEFAULT_TEMPLATE_CONFIDENCE` constant — verified via `inspect.signature` in the phase's smoke test that they're the same object, not just the same value.
+- [x] **Name the UI resize math.** Landed as module-level constants in `ui/app.py` itself, not `config/constants.py` — a scope refinement made mid-phase (see CLAUDE.md instruction 5): UI layout facts stay next to the UI code that uses them.
+- [x] **Name the health-monitor temperature-parsing heuristics.** `THERMAL_MILLIDEGREE_CUTOFF`, `MIN_PLAUSIBLE_TEMP_C`, `MAX_PLAUSIBLE_TEMP_C` — all `[INTERNAL]`.
 
-This phase is mechanical but touches nearly every file — expect it to be the most time-consuming single phase, not the riskiest.
+Also picked up along the way (found during implementation, not in the original audit list): the four unnamed `* 60` minute→second conversions (`SECONDS_PER_MINUTE`), and four more unnamed literals in `capture/scrcpy_socket.py` beyond the two retry sleeps the audit specifically called out (`SCRCPY_PORT_RANGE_SIZE`, decode-thread join timeout, teardown-command timeout, socket-connect-attempt timeout).
+
+Every constant added is tagged `[TUNABLE]` or `[INTERNAL]` per CLAUDE.md's refined instruction 5 — this is what makes Phase 12 mechanical rather than a fresh judgment call.
+
+This phase touched nearly every file, as expected — confirmed with a full-repo compile pass plus a functional smoke test (construction + settings round-trip + `DeviceWorker` wiring, including confirming `HealthMonitor.adb_cfg` is the live `Settings.adb` object, not a disconnected default).
 
 ---
 
@@ -127,6 +131,16 @@ and Phase 8 (profiles must exist to save/load from UI).
 
 ---
 
+## Phase 12 — Surface `[TUNABLE]` constants in the Settings dialog
+
+**Depends on:** Phase 3. This is a distinct UI surface from Phase 11 — Phase 11 is per-device boolean feature flags (detectors/actions/health responses, one checkbox panel per device); this phase is global numeric/threshold values (timeouts, retry delays, the thermal-throttle multiplier, etc.) in the one global Settings dialog, the same place `HealthConfig`/`DebugConfig`/`LoggingConfig` fields already live. The two don't block each other and can happen in either order.
+
+- For every constant in `config/constants.py` tagged `[TUNABLE]` (standing instruction 5 in CLAUDE.md — every constant is tagged `[TUNABLE]` or `[INTERNAL]` when it's created in Phase 3), add a field to the relevant config dataclass (`Settings` or one of its nested configs, following the pattern `LoggingConfig` already established) and a corresponding row in `ui/settings_dialog.py`.
+- Skip every `[INTERNAL]` constant entirely — by definition, it has no meaningful user context and should never surface in the UI.
+- Mechanical once Phase 3's tagging exists: the tag on each constant is the checklist for this phase, not a judgment call made fresh here.
+
+---
+
 ### Dependency chain at a glance
 
 ```
@@ -137,8 +151,10 @@ Phase 1 (logging) ──┬─→ Phase 4 (debug layer) ──┬─→ Phase 5 
                      └─→ Phase 9 (health-check visibility)
 
 Phase 2 (config split) ──┬─→ Phase 3 (no magic numbers) ──┬─→ Phase 4
-                          │                                └─→ Phase 9
-                          ├─→ Phase 6 (promote behavior flags) ──→ Phase 8 (flag snapshots)
+                          │                                ├─→ Phase 9
+                          │                                └─→ Phase 12 (surface [TUNABLE] constants)
+                          ├─→ Phase 6 (promote behavior flags) ──┬─→ Phase 8 (flag snapshots)
+                          │                                       └─→ Phase 11 (per-device flag UI)
                           ├─→ Phase 7
                           └─→ Phase 10 (tests, whenever picked up)
 ```

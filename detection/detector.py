@@ -20,6 +20,7 @@ from typing import List, Optional, Tuple
 import cv2
 import numpy as np
 
+from config.constants import DEFAULT_TEMPLATE_CONFIDENCE
 from detection.result import DetectResult
 from detection.template_bank import TemplateBank
 
@@ -28,7 +29,7 @@ def find_in_frame(
     frame_bgr: np.ndarray,
     templates: List[np.ndarray],
     template_paths: List[str],
-    threshold: float = 0.82,
+    threshold: float = DEFAULT_TEMPLATE_CONFIDENCE,
     detector_name: str = "",
 ) -> DetectResult:
     """
@@ -98,7 +99,7 @@ def run_detector_by_name(
     device_serial: str,
     device_overrides: List[str],
     bank: TemplateBank,
-    threshold: float = 0.82,
+    threshold: float = DEFAULT_TEMPLATE_CONFIDENCE,
 ) -> DetectResult:
     """
     Run a named detector against a frame using the TemplateBank.
@@ -141,7 +142,7 @@ def run_all_detectors(
     device_serial: str,
     device_overrides: List[str],
     bank: TemplateBank,
-    threshold: float = 0.82,
+    threshold: float = DEFAULT_TEMPLATE_CONFIDENCE,
 ) -> dict[str, DetectResult]:
     """
     Run all detectors in the list against a single frame.
@@ -166,7 +167,7 @@ def find_by_path(
     frame_bgr: np.ndarray,
     image_path: str,
     bank: TemplateBank,
-    threshold: float = 0.82,
+    threshold: float = DEFAULT_TEMPLATE_CONFIDENCE,
     detector_name: str = "",
 ) -> DetectResult:
     """

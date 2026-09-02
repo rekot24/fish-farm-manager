@@ -25,6 +25,7 @@ from config.settings import Settings
 from bot.device_worker import DeviceWorker
 from bot.farm_event_bus import FarmEventBus
 from detection.template_bank import TemplateBank
+from config.constants import SECONDS_PER_MINUTE
 
 # Project root (parent of bot/) — passed to app_logger.configure() so log
 # files land in <project root>/logs regardless of the process's cwd.
@@ -69,7 +70,7 @@ class DeviceManager:
             result = subprocess.run(
                 [self.settings.adb_path, "devices"],
                 capture_output=True,
-                timeout=10.0,
+                timeout=self.settings.adb.default_timeout_s,
                 text=True,
             )
             serials = []
@@ -252,8 +253,8 @@ class DeviceManager:
             return None
 
         import time
-        auto_interval = worker.cfg.timers.auto_farm_reset_interval_min * 60
-        end_interval = worker.cfg.timers.end_run_reset_interval_min * 60
+        auto_interval = worker.cfg.timers.auto_farm_reset_interval_min * SECONDS_PER_MINUTE
+        end_interval = worker.cfg.timers.end_run_reset_interval_min * SECONDS_PER_MINUTE
 
         auto_remaining = max(0, auto_interval - (time.time() - worker._last_auto_reset))
         end_remaining = max(0, end_interval - (time.time() - worker._last_end_run_reset))

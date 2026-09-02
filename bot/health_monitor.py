@@ -21,7 +21,10 @@ import time
 from dataclasses import dataclass, field
 from typing import Optional
 
-from config.settings import HealthConfig
+from config.settings import HealthConfig, AdbConfig
+from config.constants import (
+    THERMAL_MILLIDEGREE_CUTOFF, MIN_PLAUSIBLE_TEMP_C, MAX_PLAUSIBLE_TEMP_C,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -59,10 +62,13 @@ class HealthMonitor:
     One HealthMonitor instance per DeviceWorker.
     """
 
-    def __init__(self, serial: str, adb_path: str, cfg: HealthConfig):
+    def __init__(self, serial: str, adb_path: str, cfg: HealthConfig, adb_cfg: Optional[AdbConfig] = None):
         self.serial = serial
         self.adb_path = adb_path
         self.cfg = cfg
+        # Optional for backward-compatible construction; falls back to the
+        # constants.py defaults if the caller doesn't pass one.
+        self.adb_cfg = adb_cfg or AdbConfig()
 
         # Cache last known values so a failed ADB call doesn't wipe good data
         self._last_battery = -1
@@ -112,11 +118,13 @@ class HealthMonitor:
     # ADB polling helpers
     # ------------------------------------------------------------------
 
-    def _adb(self, *args, timeout: float = 5.0) -> str:
+    def _adb(self, *args, timeout: Optional[float] = None) -> str:
         """
         Run an ADB command and return stdout as a string.
         Returns empty string on any failure.
         """
+        if timeout is None:
+            timeout = self.adb_cfg.quick_timeout_s
         try:
             result = subprocess.run(
                 [self.adb_path, "-s", self.serial] + list(args),
@@ -136,7 +144,7 @@ class HealthMonitor:
             result = subprocess.run(
                 [self.adb_path, "-s", self.serial, "get-state"],
                 capture_output=True,
-                timeout=5.0,
+                timeout=self.adb_cfg.quick_timeout_s,
                 text=True,
             )
             return result.returncode == 0 and "device" in result.stdout
@@ -182,13 +190,13 @@ class HealthMonitor:
             try:
                 raw = int(line)
                 # Values can be in millidegrees (>1000) or degrees directly
-                if raw > 1000:
+                if raw > THERMAL_MILLIDEGREE_CUTOFF:
                     temp_c = raw / 1000.0
                 else:
                     temp_c = float(raw)
 
                 # Sanity check: ignore obviously wrong values
-                if 0 < temp_c < 120:
+                if MIN_PLAUSIBLE_TEMP_C < temp_c < MAX_PLAUSIBLE_TEMP_C:
                     max_temp = max(max_temp, temp_c)
             except ValueError:
                 continue
@@ -204,10 +212,10 @@ class HealthMonitor:
             result = subprocess.run(
                 [self.adb_path, "reconnect", self.serial],
                 capture_output=True,
-                timeout=10.0,
+                timeout=self.adb_cfg.default_timeout_s,
                 text=True,
             )
-            time.sleep(2.0)  # give device a moment to re-enumerate
+            time.sleep(self.adb_cfg.reconnect_settle_s)  # give device a moment to re-enumerate
             return self._check_adb()
         except Exception:
             return False

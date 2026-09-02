@@ -45,6 +45,11 @@ import numpy as np
 import cv2
 
 from capture.base import CaptureBackend
+from config.constants import (
+    ADB_DEFAULT_TIMEOUT_S, SCRCPY_PORT_RANGE_SIZE, SCRCPY_SERVER_BIND_SETTLE_S,
+    SCRCPY_DECODE_THREAD_JOIN_TIMEOUT_S, SCRCPY_TEARDOWN_TIMEOUT_S,
+    SCRCPY_SOCKET_CONNECT_ATTEMPT_TIMEOUT_S, SCRCPY_SOCKET_RETRY_SLEEP_S,
+)
 
 
 # Port used for ADB forward. Each device needs a unique port if running
@@ -58,7 +63,7 @@ def _port_for_serial(serial: str) -> int:
     Uses a hash to pick from a range of ports so they don't collide.
     Range: 27183 - 27283 (100 ports, enough for 100 devices).
     """
-    return _BASE_PORT + (hash(serial) % 100)
+    return _BASE_PORT + (hash(serial) % SCRCPY_PORT_RANGE_SIZE)
 
 
 class ScrcpySocketBackend(CaptureBackend):
@@ -141,7 +146,7 @@ class ScrcpySocketBackend(CaptureBackend):
                 return False
 
             # 4. Give the server a moment to bind its socket
-            time.sleep(0.5)
+            time.sleep(SCRCPY_SERVER_BIND_SETTLE_S)
 
             # 5. Connect our local socket
             if not self._connect_socket():
@@ -189,7 +194,7 @@ class ScrcpySocketBackend(CaptureBackend):
 
         # Stop decode thread
         if self._decode_thread and self._decode_thread.is_alive():
-            self._decode_thread.join(timeout=2.0)
+            self._decode_thread.join(timeout=SCRCPY_DECODE_THREAD_JOIN_TIMEOUT_S)
 
         # Close socket
         if self._sock:
@@ -212,7 +217,7 @@ class ScrcpySocketBackend(CaptureBackend):
             subprocess.run(
                 [self.adb_path, "-s", self.serial, "shell",
                  "pkill", "-f", "scrcpy-server"],
-                timeout=3, capture_output=True,
+                timeout=SCRCPY_TEARDOWN_TIMEOUT_S, capture_output=True,
             )
         except Exception:
             pass
@@ -222,7 +227,7 @@ class ScrcpySocketBackend(CaptureBackend):
             subprocess.run(
                 [self.adb_path, "-s", self.serial, "forward",
                  "--remove", f"tcp:{self.local_port}"],
-                timeout=3, capture_output=True,
+                timeout=SCRCPY_TEARDOWN_TIMEOUT_S, capture_output=True,
             )
         except Exception:
             pass
@@ -231,7 +236,7 @@ class ScrcpySocketBackend(CaptureBackend):
     # Internal connection steps
     # ------------------------------------------------------------------
 
-    def _adb(self, *args, timeout: float = 10.0, capture: bool = True) -> subprocess.CompletedProcess:
+    def _adb(self, *args, timeout: float = ADB_DEFAULT_TIMEOUT_S, capture: bool = True) -> subprocess.CompletedProcess:
         """Run an adb command for this device."""
         cmd = [self.adb_path, "-s", self.serial] + list(args)
         return subprocess.run(cmd, capture_output=capture, timeout=timeout)
@@ -297,13 +302,13 @@ class ScrcpySocketBackend(CaptureBackend):
         while time.time() < deadline:
             try:
                 sock = socket.create_connection(
-                    ("127.0.0.1", self.local_port), timeout=2.0
+                    ("127.0.0.1", self.local_port), timeout=SCRCPY_SOCKET_CONNECT_ATTEMPT_TIMEOUT_S
                 )
                 sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
                 self._sock = sock
                 return True
             except (ConnectionRefusedError, OSError):
-                time.sleep(0.2)  # server not ready yet, retry
+                time.sleep(SCRCPY_SOCKET_RETRY_SLEEP_S)  # server not ready yet, retry
         print(f"[scrcpy] Socket connection timed out for {self.serial}")
         return False
 

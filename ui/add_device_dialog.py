@@ -15,6 +15,7 @@ from tkinter import ttk, messagebox
 from typing import List, Optional
 
 from config.devices import DeviceConfig, TimerConfig, load_devices, save_devices
+from config.constants import ADB_DEFAULT_TIMEOUT_S
 
 PROFILES = ["support_private", "lead_private", "support_public", "lead_public"]
 
@@ -92,7 +93,7 @@ class AddDeviceDialog:
         try:
             result = subprocess.run(
                 [self.adb_path, "devices"],
-                capture_output=True, timeout=10, text=True,
+                capture_output=True, timeout=ADB_DEFAULT_TIMEOUT_S, text=True,
             )
             new_serials = []
             for line in result.stdout.splitlines():

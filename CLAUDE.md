@@ -69,7 +69,12 @@ If asked to do something that conflicts with those standards, flag it before pro
 - [2026-09-02] `logs/errors.log` always records ERROR/CRITICAL regardless of the `logging.enabled` master switch — a failure record must not depend on the same switch that silences routine noise
 - [2026-09-02] UI-triggered actions on a worker go through public `DeviceManager` methods (`is_device_running`, `trigger_end_run`) backed by public `DeviceWorker` methods (`request_manual_end_run`) — the UI must never call a worker's private methods or reach into `DeviceManager`'s private worker dict, per the standard's non-negotiable UI rule
 - [2026-09-02] `config_manager.py` split into `config/settings.py` / `config/devices.py` / `config/profiles.py`, with a new `config/paths.py` holding the path-resolution helpers all three share — added beyond what ROADMAP.md's Phase 2 wrote down, specifically to avoid three copies of the same `_project_root()`-style functions after the split
+- [2026-09-02] Every constant in `config/constants.py` (Phase 3 onward) is tagged `[TUNABLE]` or `[INTERNAL]` in its comment, not just explained in prose — `[TUNABLE]` means user-adjustable, will get a settings-dialog row and a config-store override; `[INTERNAL]` means it needs a name but has no user-facing meaning and never surfaces in the UI. Makes the later UI-surfacing pass mechanical instead of a fresh judgment call per constant.
+- [2026-09-02] Surfacing `[TUNABLE]` constants.py values in the Settings dialog is its own ROADMAP phase (Phase 12), separate from Phase 11's per-device feature-flag checkboxes — they're different UI surfaces (one global dialog vs. one panel per device) with different dependencies (Phase 3 vs. Phase 6+8), even though both were originally lumped under "Phase 11 — settings UI" in conversation
+- [2026-09-02] `config/constants.py` (instruction 5) is scoped to app-wide/config-meaningful magic numbers — not literally every numeric literal anywhere. Purely local UI layout facts (e.g. `ui/app.py`'s resize-math constants) stay as module-level constants next to the code that uses them, rather than being centralized alongside ADB timeouts and health thresholds
 - [2026-09-02] `bot/config_manager.py` deleted outright rather than kept as a re-export shim — no consumers of it exist outside this repo, so a shim would only be a second source of truth to keep in sync for no benefit
+- [2026-09-02] `[TUNABLE]` constants get a live config-dataclass field now (Phase 3) only where the call site already holds a live `Settings`/`HealthMonitor` reference — `HealthConfig` (device_worker.py's settle/poll delays) and the new `AdbConfig` (health_monitor.py, device_manager.py). `bot/actions.py`'s free functions and the three standalone Tkinter tool dialogs (image_capture_tool.py, coordinate_finder.py, add_device_dialog.py) use the same named constants as static defaults instead — they don't currently receive a `Settings` object at all, and threading one through ~15 call sites is a bigger change than this phase's scope. Recorded in AUDIT.md §4 as a deliberate, visible boundary, not a silent gap.
+- [2026-09-02] `_max_unknown_s` (crash-detection timeout) removed as a cached instance attribute — `_check_crash_timeout()` now reads `self.settings.health.crash_detect_after_s` live at the point of use, so a settings change takes effect immediately rather than requiring the worker to restart, consistent with every other live setting in the app
 
 ## Tried and rejected
 - [2026-08-27] Galaxy XCover Pro — GPU (Mali-G72) too weak for Roblox rendering; retired to shelf — do not re-add to active farm
@@ -77,15 +82,15 @@ If asked to do something that conflicts with those standards, flag it before pro
 - [2026-09-02] A `ui_sink` callback-registration layer in `app_logger.py`, for forwarding log calls to the UI — added, then removed same session. Every log call already flows through `App.log()`, which handles the file logger and the UI queue directly; the extra indirection had no second caller. Don't re-add without an actual need for something other than `App.log()` to reach the UI.
 
 ## Planned work (see ROADMAP.md for full list)
-- Per-device feature flag UI — checkboxes for every detector, action, and health response per device
-- Profile system — save/load named sets of feature flags per device
-- No magic numbers — extract timeouts, retry delays, and layout constants into named values (ROADMAP Phase 3; standing instruction 5 also calls for a dedicated `config/constants.py`, not yet created)
+- Per-device feature flag UI — checkboxes for every detector, action, and health response per device (ROADMAP Phase 11)
+- Profile system — save/load named sets of feature flags per device (ROADMAP Phase 8)
 - Debug layer master switch + per-category flags (ROADMAP Phase 4)
+- Surface `[TUNABLE]` constants in the Settings dialog (ROADMAP Phase 12) — the constants themselves are named and live in `config/constants.py` as of Phase 3; the actual UI rows are still pending, along with settings-store threading for `bot/actions.py` and the standalone tool dialogs (see AUDIT.md §4)
 - CLAUDE.md standing instructions compliance audit — codebase predates these standards
 
 ## Current state
-- Working: ADB connection, screenshot capture, template detection, state machine, basic actions, health monitoring, UI display, persistent logging (rotating `logs/app.log` + always-on `logs/errors.log`, real per-message levels), config loading/saving/validation split into `config/settings.py` / `config/devices.py` / `config/profiles.py` / `config/paths.py`
-- In progress: Per-device feature flag system, profile save/load; working through ROADMAP.md's standards-compliance phases (Phase 0, 1, 2 done, Phase 3 — no magic numbers — is next)
+- Working: ADB connection, screenshot capture, template detection, state machine, basic actions, health monitoring, UI display, persistent logging (rotating `logs/app.log` + always-on `logs/errors.log`, real per-message levels), config loading/saving/validation split into `config/settings.py` / `config/devices.py` / `config/profiles.py` / `config/paths.py`, every magic number named and tagged in `config/constants.py`
+- In progress: Per-device feature flag system, profile save/load; working through ROADMAP.md's standards-compliance phases (Phase 0, 1, 2, 3 done, Phase 4 — debug layer — is next)
 - Known broken: Detection loop reliability — multiple behaviors running simultaneously without individual toggles makes isolation and debugging difficult
 
 ## Session log
@@ -110,6 +115,21 @@ If asked to do something that conflicts with those standards, flag it before pro
 - Updated README.md, AUDIT.md, and ROADMAP.md to point at the new file locations (including the stray-`print()` line numbers, which moved with the split but are still unfixed — that's Phase 5).
 - Modified: main.py, ui/app.py, ui/settings_dialog.py, ui/device_settings_dialog.py, ui/add_device_dialog.py, tools/image_capture_tool.py, bot/device_worker.py, bot/device_manager.py, bot/health_monitor.py, bot/app_logger.py, README.md, AUDIT.md, ROADMAP.md, CLAUDE.md. Added: config/__init__.py, config/paths.py, config/settings.py, config/devices.py, config/profiles.py. Deleted: bot/config_manager.py.
 
+### 2026-09-02 — standing instruction 5 refined, ahead of Phase 3
+- User added the `[TUNABLE]`/`[INTERNAL]` tagging requirement to instruction 5 before Phase 3 started, plus the UI-layout-constants exception (both now in the instruction text itself, not just prose).
+- Surfaced and resolved a scope mismatch: instruction 5's UI-surfacing pass was going to target "ROADMAP Phase 11," but Phase 11 turned out to already be a different, pre-existing thing (per-device feature-flag checkboxes). Split into a new Phase 12 specifically for surfacing `[TUNABLE]` constants in the global Settings dialog, with its own dependency (Phase 3) — see key decisions above.
+- Modified: CLAUDE.md, ROADMAP.md.
+
+### 2026-09-02 — Phase 3 (ROADMAP.md)
+- Created `config/constants.py`: every genuinely bare/unnamed literal cataloged in AUDIT.md §4, each tagged `[TUNABLE]` or `[INTERNAL]`. ADB timeouts split into three tiers (`ADB_QUICK_TIMEOUT_S`/`ADB_DEFAULT_TIMEOUT_S`/`ADB_LAUNCH_TIMEOUT_S`, plus screencap/reconnect variants) rather than collapsed to one value, since the current literals differ for real reasons.
+- Added a new `AdbConfig` to `config/settings.py`, and six new fields to `HealthConfig` (crash/battery/temp settle and poll delays, thermal-throttle multiplier) — live-wired for call sites that already hold a `Settings` reference (`HealthMonitor`, `DeviceManager`, `DeviceWorker`). `bot/actions.py` and the three standalone Tkinter tool dialogs use the same constants as static defaults, not live settings — flagged explicitly as a scope boundary, not a silent gap (see key decisions).
+- Removed `_max_unknown_s` as a cached instance attribute on `DeviceWorker`; crash-detection timeout now reads live from `self.settings.health.crash_detect_after_s`.
+- Deduped the `0.82` template-confidence default: `detection/detector.py`'s four functions and `Settings.template_confidence_default` now all reference one `DEFAULT_TEMPLATE_CONFIDENCE` constant.
+- Named the UI resize-math constants locally in `ui/app.py` (not `config/constants.py`), per the refined instruction 5.
+- Found and fixed four more unnamed literals in `capture/scrcpy_socket.py` beyond what the original audit called out, while already in that file for the two retry sleeps.
+- Verified with a full-repo compile pass, a functional smoke test (Settings defaults, detector.py/Settings sharing the same confidence-default object via `inspect.signature`, save/load round-trip with the new fields, HealthMonitor's live `adb_cfg` wiring), and a `DeviceWorker` end-to-end construction test confirming `_max_unknown_s` is gone and `_health_monitor.adb_cfg is settings.adb`.
+- Modified: bot/device_worker.py, bot/device_manager.py, bot/actions.py, bot/health_monitor.py, config/settings.py, detection/detector.py, capture/adb_screencap.py, capture/scrcpy_socket.py, ui/app.py, ui/add_device_dialog.py, tools/coordinate_finder.py, tools/image_capture_tool.py, README.md, AUDIT.md, ROADMAP.md, CLAUDE.md. Added: config/constants.py.
+
 ---
 
 ## Standing instructions
@@ -120,7 +140,17 @@ These apply every session without being included in the prompt:
 2. Read app-framework.md from https://github.com/Rekot24/dev-standards before any architectural work.
 3. Before building anything, explain what you are going to do and why. Wait for confirmation before proceeding.
 4. Flag anything that conflicts with dev-standards before proceeding — do not comply silently.
-5. No magic numbers or magic strings — all named values go in `config/constants.py` with a comment explaining what they mean and where they came from.
+5. No magic numbers or magic strings — all named values go in `config/constants.py` with a comment explaining what they mean and where they came from, **except UI layout constants** (pixel sizes, row heights, widget counts, and the like), which live as named module-level constants at the top of the UI file that uses them, not in `config/constants.py` — they have no config/settings meaning, they're facts about one screen's rendering. Every constant's comment (in either location) also carries a `[TUNABLE]` or `[INTERNAL]` tag:
+   - `[TUNABLE]` — a user-adjustable value that will be exposed in the settings UI and overridable through the settings store. The constant is the default.
+   - `[INTERNAL]` — an implementation fact. It needs a name but has no meaningful user context, and never surfaces in the UI.
+   ```python
+   # [TUNABLE] ADB command timeout — increase for slow or high-latency devices
+   ADB_TIMEOUT_S = 10.0
+
+   # [INTERNAL] Max 32-bit integer — used as "never timeout" for screen_off_timeout ADB command
+   MAX_INT32 = 2147483647
+   ```
+   This makes ROADMAP Phase 12 (surfacing tunables in the global Settings dialog — distinct from Phase 11's per-device feature-flag checkboxes) mechanical: surface every `[TUNABLE]` constant, skip every `[INTERNAL]` one.
 6. No raw print statements — all output goes through the logger.
 7. Every function gets a docstring before implementation is written.
 8. All error handling follows the two-mode pattern: fail loudly in development, fail gracefully in production.

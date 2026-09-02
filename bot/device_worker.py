@@ -42,6 +42,9 @@ from capture import make_backend
 from capture.base import CaptureBackend
 from detection.detector import run_all_detectors, find_by_path
 from detection.template_bank import TemplateBank
+from config.constants import (
+    WORKER_JOIN_TIMEOUT_S, LOOP_SLEEP_FLOOR_S, SECONDS_PER_MINUTE,
+)
 
 
 def _default_log_fn(msg: str, level: str = "INFO") -> None:
@@ -93,6 +96,7 @@ class DeviceWorker:
             serial=device_cfg.serial,
             adb_path=settings.adb_path,
             cfg=settings.health,
+            adb_cfg=settings.adb,
         )
 
         # Timer tracking
@@ -100,9 +104,11 @@ class DeviceWorker:
         self._last_end_run_reset = time.time()
         self._pending_cascade_reset: Optional[float] = None  # timestamp when to fire
 
-        # Crash detection: track how long we've been in UNKNOWN
+        # Crash detection: track how long we've been in UNKNOWN.
+        # Timeout itself is read live from self.settings.health.crash_detect_after_s
+        # at the point of use (_check_crash_timeout), not cached here — so a
+        # settings change takes effect immediately, same as everything else.
         self._unknown_since: Optional[float] = None
-        self._max_unknown_s = 60.0
 
         # Public mode: per-session revive counter (starts at configured max, never persisted)
         self.revives_remaining: int = device_cfg.revive_count
@@ -134,7 +140,7 @@ class DeviceWorker:
         """Signal the worker thread to stop and wait for it to exit."""
         self._stop_event.set()
         if self._thread:
-            self._thread.join(timeout=5.0)
+            self._thread.join(timeout=WORKER_JOIN_TIMEOUT_S)
         if self._backend:
             self._backend.disconnect()
         self._log(f"Worker stopped for {self.cfg.nickname or self.cfg.serial}")
@@ -185,10 +191,10 @@ class DeviceWorker:
 
             elapsed = time.time() - t0
             target_s = self.cfg.scan_interval_ms / 1000.0
-            # Double scan interval while temperature is elevated but not critical
+            # Reduce scan frequency while temperature is elevated but not critical
             if self.health.temp_throttle:
-                target_s *= 2.0
-            sleep_s = max(0.05, target_s - elapsed)
+                target_s *= self.settings.health.thermal_throttle_multiplier
+            sleep_s = max(LOOP_SLEEP_FLOOR_S, target_s - elapsed)
             self._stop_event.wait(timeout=sleep_s)
 
         if self._backend:
@@ -282,7 +288,7 @@ class DeviceWorker:
         if not self.cfg.timers.auto_farm_reset_enabled:
             return
 
-        interval_s = self.cfg.timers.auto_farm_reset_interval_min * 60
+        interval_s = self.cfg.timers.auto_farm_reset_interval_min * SECONDS_PER_MINUTE
         if time.time() - self._last_auto_reset < interval_s:
             return
 
@@ -311,7 +317,7 @@ class DeviceWorker:
         if not self.cfg.timers.end_run_reset_enabled:
             return
 
-        interval_s = self.cfg.timers.end_run_reset_interval_min * 60
+        interval_s = self.cfg.timers.end_run_reset_interval_min * SECONDS_PER_MINUTE
         if time.time() - self._last_end_run_reset < interval_s:
             return
 
@@ -494,7 +500,7 @@ class DeviceWorker:
             return
 
         elapsed = time.time() - self._unknown_since
-        if elapsed > self._max_unknown_s:
+        if elapsed > self.settings.health.crash_detect_after_s:
             self._log(f"[{self._name()}] UNKNOWN for {elapsed:.0f}s — treating as crash", "ERROR")
             self._unknown_since = None
             self._recover_from_crash()
@@ -509,7 +515,7 @@ class DeviceWorker:
         self._log(f"[{self._name()}] Crash recovery starting", "WARNING")
 
         actions.force_stop_roblox(self.cfg.serial, adb_path=self.settings.adb_path)
-        self._stop_event.wait(timeout=3.0)
+        self._stop_event.wait(timeout=self.settings.health.crash_recovery_settle_s)
 
         launched = actions.launch_roblox(self.cfg.serial, adb_path=self.settings.adb_path)
         self._log(f"[{self._name()}] Roblox launched: {launched}", "INFO" if launched else "ERROR")
@@ -607,18 +613,18 @@ class DeviceWorker:
         self._log(f"[{self._name()}] Battery critical ({self.health.battery_percent}%), entering sleep", "WARNING")
 
         actions.force_stop_roblox(self.cfg.serial, adb_path=self.settings.adb_path)
-        self._stop_event.wait(timeout=1.0)
+        self._stop_event.wait(timeout=self.settings.health.battery_sleep_settle_s)
         actions.sleep_device(self.cfg.serial, adb_path=self.settings.adb_path)
 
         while not self._stop_event.is_set():
-            self._stop_event.wait(timeout=60.0)
+            self._stop_event.wait(timeout=self.settings.health.battery_sleep_poll_s)
             health = self._health_monitor.check()
             with self._health_lock:
                 self.health = health
             if health.battery_percent >= self.settings.health.battery_resume_percent:
                 self._log(f"[{self._name()}] Battery recovered ({health.battery_percent}%), waking")
                 actions.wake_device(self.cfg.serial, adb_path=self.settings.adb_path)
-                self._stop_event.wait(timeout=10.0)
+                self._stop_event.wait(timeout=self.settings.health.wake_settle_s)
                 actions.launch_roblox(self.cfg.serial, adb_path=self.settings.adb_path)
                 self._set_state(STATE_UNKNOWN)
                 return
@@ -630,7 +636,7 @@ class DeviceWorker:
         actions.sleep_device(self.cfg.serial, adb_path=self.settings.adb_path)
 
         while not self._stop_event.is_set():
-            self._stop_event.wait(timeout=30.0)
+            self._stop_event.wait(timeout=self.settings.health.temp_pause_poll_s)
             health = self._health_monitor.check()
             with self._health_lock:
                 self.health = health

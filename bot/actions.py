@@ -16,8 +16,10 @@ import subprocess
 import time
 from typing import Optional, Tuple
 
+from config.constants import ADB_DEFAULT_TIMEOUT_S, ADB_LAUNCH_TIMEOUT_S, ADB_QUICK_TIMEOUT_S
 
-def _adb(adb_path: str, serial: str, *args, timeout: float = 10.0) -> subprocess.CompletedProcess:
+
+def _adb(adb_path: str, serial: str, *args, timeout: float = ADB_DEFAULT_TIMEOUT_S) -> subprocess.CompletedProcess:
     """Run an ADB shell command for a specific device."""
     cmd = [adb_path, "-s", serial] + list(args)
     return subprocess.run(cmd, capture_output=True, timeout=timeout)
@@ -114,7 +116,7 @@ def launch_roblox(
         "-p", package,
         "-c", "android.intent.category.LAUNCHER",
         "1",
-        timeout=15.0,
+        timeout=ADB_LAUNCH_TIMEOUT_S,
     )
     return result.returncode == 0
 
@@ -155,7 +157,7 @@ def join_server_by_link(
         "-a", "android.intent.action.VIEW",
         "-d", link,
         package,
-        timeout=15.0,
+        timeout=ADB_LAUNCH_TIMEOUT_S,
     )
     return result.returncode == 0
 
@@ -170,7 +172,7 @@ def is_roblox_running(
     Uses pidof to check for the process.
     """
     try:
-        result = _adb(adb_path, serial, "shell", "pidof", package, timeout=5.0)
+        result = _adb(adb_path, serial, "shell", "pidof", package, timeout=ADB_QUICK_TIMEOUT_S)
         return bool(result.stdout.strip())
     except Exception:
         return False
@@ -186,7 +188,7 @@ def get_foreground_app(serial: str, adb_path: str = "adb") -> Optional[str]:
             adb_path, serial,
             "shell", "dumpsys", "activity",
             "activities", "|", "grep", "mResumedActivity",
-            timeout=5.0,
+            timeout=ADB_QUICK_TIMEOUT_S,
         )
         output = result.stdout.decode("utf-8", errors="replace")
         # Output format: "mResumedActivity: ActivityRecord{... package/component ...}"

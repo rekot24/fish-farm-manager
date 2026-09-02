@@ -33,6 +33,7 @@ from PIL import Image, ImageTk
 
 from config.devices import DeviceConfig, DetectorConfig, load_devices, save_devices
 from config.profiles import load_profile
+from config.constants import ADB_DEFAULT_TIMEOUT_S, ADB_SCREENCAP_BATCH_TIMEOUT_S
 from detection.template_bank import TemplateBank
 from detection.detector import find_by_path, run_detector_by_name
 
@@ -331,7 +332,7 @@ class ImageCaptureTool:
             try:
                 result = subprocess.run(
                     ["adb", "-s", dev.serial, "exec-out", "screencap", "-p"],
-                    capture_output=True, timeout=10,
+                    capture_output=True, timeout=ADB_DEFAULT_TIMEOUT_S,
                 )
                 if result.returncode != 0 or not result.stdout:
                     self.top.after(0, lambda: self._capture_failed("ADB screencap returned no data"))
@@ -871,7 +872,7 @@ class ImageCaptureTool:
                 try:
                     result = subprocess.run(
                         ["adb", "-s", dev.serial, "exec-out", "screencap", "-p"],
-                        capture_output=True, timeout=15,
+                        capture_output=True, timeout=ADB_SCREENCAP_BATCH_TIMEOUT_S,
                     )
                     if result.returncode != 0 or not result.stdout:
                         self.top.after(0, lambda d=dev: self._lbl_manage_status.config(
@@ -943,7 +944,7 @@ class ImageCaptureTool:
             try:
                 result = subprocess.run(
                     ["adb", "-s", dev.serial, "exec-out", "screencap", "-p"],
-                    capture_output=True, timeout=10,
+                    capture_output=True, timeout=ADB_DEFAULT_TIMEOUT_S,
                 )
                 if result.returncode != 0 or not result.stdout:
                     self.top.after(0, lambda: self._single_test_done(None, "Capture failed"))

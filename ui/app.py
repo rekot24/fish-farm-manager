@@ -35,6 +35,15 @@ class App:
     POLL_INTERVAL_MS = 500    # how often to refresh device status from workers
     LOG_MAX_LINES = 500       # max lines to keep in the log panel
 
+    # UI layout constants — local to this file (not config/constants.py):
+    # facts about how this one window renders, not app configuration.
+    RESIZE_DEBOUNCE_MS = 100         # delay before _resize_to_fit runs after adding a device panel
+    LOG_DRAIN_INTERVAL_MS = 100      # how often the log queue is drained into the log panel
+    MAX_VISIBLE_DEVICES_FOR_RESIZE = 10   # cap the window's auto-resize growth at this many device rows
+    DEVICE_PANEL_HEIGHT_PX = 78      # must match DevicePanel's actual rendered row height
+    LOG_PANEL_HEIGHT_PX = 220        # fixed height reserved for the log panel
+    TOP_BAR_HEIGHT_PX = 60           # fixed height reserved for the top button bar
+
     def __init__(self, root: tk.Tk, manager: DeviceManager, startup_warnings: List[str] = None):
         self.root = root
         self.manager = manager
@@ -169,16 +178,14 @@ class App:
             panel.grid(row=i, column=0, sticky="ew", pady=(0, 2))
             self._device_container.columnconfigure(0, weight=1)
             self._device_panels[serial] = panel
-            self.root.after(100, self._resize_to_fit)
+            self.root.after(self.RESIZE_DEBOUNCE_MS, self._resize_to_fit)
 
     def _resize_to_fit(self) -> None:
-        """Resize window to fit current number of devices, capped at 10."""
+        """Resize window to fit current number of devices, capped at MAX_VISIBLE_DEVICES_FOR_RESIZE."""
         device_count = len(self._device_panels)
-        capped = min(device_count, 10)
-        panel_height = capped * 78
-        log_height = 220
-        top_height = 60
-        total = panel_height + log_height + top_height
+        capped = min(device_count, self.MAX_VISIBLE_DEVICES_FOR_RESIZE)
+        panel_height = capped * self.DEVICE_PANEL_HEIGHT_PX
+        total = panel_height + self.LOG_PANEL_HEIGHT_PX + self.TOP_BAR_HEIGHT_PX
         print(f"[resize] devices={device_count} total_height={total}")
         self.root.geometry(f"820x{total}")
 
@@ -209,7 +216,7 @@ class App:
                 self._append_log(msg)
         except queue.Empty:
             pass
-        self.root.after(100, self._drain_log_queue)
+        self.root.after(self.LOG_DRAIN_INTERVAL_MS, self._drain_log_queue)
 
     # ------------------------------------------------------------------
     # Log helpers

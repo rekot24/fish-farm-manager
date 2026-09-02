@@ -25,6 +25,8 @@ import cv2
 import numpy as np
 from PIL import Image, ImageTk
 
+from config.constants import ADB_DEFAULT_TIMEOUT_S
+
 
 class CoordinateFinder:
     """
@@ -112,7 +114,7 @@ class CoordinateFinder:
             try:
                 result = subprocess.run(
                     [self.adb_path, "-s", serial, "exec-out", "screencap", "-p"],
-                    capture_output=True, timeout=10,
+                    capture_output=True, timeout=ADB_DEFAULT_TIMEOUT_S,
                 )
                 if result.returncode != 0 or not result.stdout:
                     self.top.after(0, lambda: self._lbl_status.config(

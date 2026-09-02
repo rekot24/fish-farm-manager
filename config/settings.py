@@ -16,6 +16,15 @@ from dataclasses import dataclass, field
 from typing import List
 
 from config.paths import settings_path
+from config.constants import (
+    DEFAULT_TEMPLATE_CONFIDENCE,
+    CRASH_DETECT_AFTER_S, CRASH_RECOVERY_SETTLE_S,
+    BATTERY_SLEEP_SETTLE_S, BATTERY_SLEEP_POLL_S, WAKE_SETTLE_S,
+    TEMP_PAUSE_POLL_S, THERMAL_THROTTLE_MULTIPLIER,
+    ADB_QUICK_TIMEOUT_S, ADB_DEFAULT_TIMEOUT_S, ADB_LAUNCH_TIMEOUT_S,
+    ADB_SCREENCAP_TIMEOUT_S, ADB_SCREENCAP_BATCH_TIMEOUT_S,
+    ADB_RECONNECT_SETTLE_S,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -30,6 +39,38 @@ class HealthConfig:
     temp_pause_celsius: float = 52.0
     temp_resume_celsius: float = 40.0
     adb_reconnect_interval_s: int = 10
+
+    # Device recovery/settle timing — see config/constants.py for why each
+    # of these is tunable (the farm spans a Pixel 3 to a Pixel 8a).
+    crash_detect_after_s: float = CRASH_DETECT_AFTER_S
+    crash_recovery_settle_s: float = CRASH_RECOVERY_SETTLE_S
+    battery_sleep_settle_s: float = BATTERY_SLEEP_SETTLE_S
+    battery_sleep_poll_s: float = BATTERY_SLEEP_POLL_S
+    wake_settle_s: float = WAKE_SETTLE_S
+    temp_pause_poll_s: float = TEMP_PAUSE_POLL_S
+    thermal_throttle_multiplier: float = THERMAL_THROTTLE_MULTIPLIER
+
+
+@dataclass
+class AdbConfig:
+    """
+    ADB command timeouts, by tier — see config/constants.py for why these
+    are three separate values rather than one shared timeout.
+
+    Only wired live for call sites that already hold a Settings/HealthMonitor
+    reference (HealthMonitor, DeviceManager). bot/actions.py and the
+    standalone Tkinter tool dialogs (image_capture_tool.py,
+    coordinate_finder.py, add_device_dialog.py) use the config/constants.py
+    values directly as static defaults rather than reading from here —
+    threading a live Settings reference through those free functions is a
+    bigger change than this phase's scope. See AUDIT.md / ROADMAP.md Phase 3.
+    """
+    quick_timeout_s: float = ADB_QUICK_TIMEOUT_S
+    default_timeout_s: float = ADB_DEFAULT_TIMEOUT_S
+    launch_timeout_s: float = ADB_LAUNCH_TIMEOUT_S
+    screencap_timeout_s: float = ADB_SCREENCAP_TIMEOUT_S
+    screencap_batch_timeout_s: float = ADB_SCREENCAP_BATCH_TIMEOUT_S
+    reconnect_settle_s: float = ADB_RECONNECT_SETTLE_S
 
 
 @dataclass
@@ -60,10 +101,11 @@ class LoggingConfig:
 class Settings:
     adb_path: str = "adb"
     scan_interval_ms: int = 800
-    template_confidence_default: float = 0.82
+    template_confidence_default: float = DEFAULT_TEMPLATE_CONFIDENCE
     private_server_link: str = ""
     capture_backend_default: str = "scrcpy"   # "scrcpy" or "adb"
     health: HealthConfig = field(default_factory=HealthConfig)
+    adb: AdbConfig = field(default_factory=AdbConfig)
     debug: DebugConfig = field(default_factory=DebugConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
 
@@ -86,13 +128,14 @@ def load_settings() -> Settings:
         data = json.load(f)
 
     health_data = data.get("health", {})
+    adb_data = data.get("adb", {})
     debug_data = data.get("debug", {})
     logging_data = data.get("logging", {})
 
     return Settings(
         adb_path=data.get("adb_path", "adb"),
         scan_interval_ms=data.get("scan_interval_ms", 800),
-        template_confidence_default=data.get("template_confidence_default", 0.82),
+        template_confidence_default=data.get("template_confidence_default", DEFAULT_TEMPLATE_CONFIDENCE),
         private_server_link=data.get("private_server_link", ""),
         capture_backend_default=data.get("capture_backend_default", "scrcpy"),
         health=HealthConfig(
@@ -102,6 +145,21 @@ def load_settings() -> Settings:
             temp_pause_celsius=health_data.get("temp_pause_celsius", 52.0),
             temp_resume_celsius=health_data.get("temp_resume_celsius", 40.0),
             adb_reconnect_interval_s=health_data.get("adb_reconnect_interval_s", 10),
+            crash_detect_after_s=health_data.get("crash_detect_after_s", CRASH_DETECT_AFTER_S),
+            crash_recovery_settle_s=health_data.get("crash_recovery_settle_s", CRASH_RECOVERY_SETTLE_S),
+            battery_sleep_settle_s=health_data.get("battery_sleep_settle_s", BATTERY_SLEEP_SETTLE_S),
+            battery_sleep_poll_s=health_data.get("battery_sleep_poll_s", BATTERY_SLEEP_POLL_S),
+            wake_settle_s=health_data.get("wake_settle_s", WAKE_SETTLE_S),
+            temp_pause_poll_s=health_data.get("temp_pause_poll_s", TEMP_PAUSE_POLL_S),
+            thermal_throttle_multiplier=health_data.get("thermal_throttle_multiplier", THERMAL_THROTTLE_MULTIPLIER),
+        ),
+        adb=AdbConfig(
+            quick_timeout_s=adb_data.get("quick_timeout_s", ADB_QUICK_TIMEOUT_S),
+            default_timeout_s=adb_data.get("default_timeout_s", ADB_DEFAULT_TIMEOUT_S),
+            launch_timeout_s=adb_data.get("launch_timeout_s", ADB_LAUNCH_TIMEOUT_S),
+            screencap_timeout_s=adb_data.get("screencap_timeout_s", ADB_SCREENCAP_TIMEOUT_S),
+            screencap_batch_timeout_s=adb_data.get("screencap_batch_timeout_s", ADB_SCREENCAP_BATCH_TIMEOUT_S),
+            reconnect_settle_s=adb_data.get("reconnect_settle_s", ADB_RECONNECT_SETTLE_S),
         ),
         debug=DebugConfig(
             save_failed_captures=debug_data.get("save_failed_captures", True),
@@ -137,6 +195,21 @@ def save_settings(settings: Settings) -> None:
             "temp_pause_celsius": settings.health.temp_pause_celsius,
             "temp_resume_celsius": settings.health.temp_resume_celsius,
             "adb_reconnect_interval_s": settings.health.adb_reconnect_interval_s,
+            "crash_detect_after_s": settings.health.crash_detect_after_s,
+            "crash_recovery_settle_s": settings.health.crash_recovery_settle_s,
+            "battery_sleep_settle_s": settings.health.battery_sleep_settle_s,
+            "battery_sleep_poll_s": settings.health.battery_sleep_poll_s,
+            "wake_settle_s": settings.health.wake_settle_s,
+            "temp_pause_poll_s": settings.health.temp_pause_poll_s,
+            "thermal_throttle_multiplier": settings.health.thermal_throttle_multiplier,
+        },
+        "adb": {
+            "quick_timeout_s": settings.adb.quick_timeout_s,
+            "default_timeout_s": settings.adb.default_timeout_s,
+            "launch_timeout_s": settings.adb.launch_timeout_s,
+            "screencap_timeout_s": settings.adb.screencap_timeout_s,
+            "screencap_batch_timeout_s": settings.adb.screencap_batch_timeout_s,
+            "reconnect_settle_s": settings.adb.reconnect_settle_s,
         },
         "debug": {
             "save_failed_captures": settings.debug.save_failed_captures,
