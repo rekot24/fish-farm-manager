@@ -31,10 +31,8 @@ import cv2
 import numpy as np
 from PIL import Image, ImageTk
 
-from bot.config_manager import (
-    DeviceConfig, DetectorConfig,
-    load_devices, save_devices, load_profile,
-)
+from config.devices import DeviceConfig, DetectorConfig, load_devices, save_devices
+from config.profiles import load_profile
 from detection.template_bank import TemplateBank
 from detection.detector import find_by_path, run_detector_by_name
 

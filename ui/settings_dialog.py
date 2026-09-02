@@ -11,7 +11,7 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import ttk
 
-from bot.config_manager import Settings, HealthConfig, DebugConfig, LoggingConfig
+from config.settings import Settings, HealthConfig, DebugConfig, LoggingConfig
 
 
 class SettingsDialog:

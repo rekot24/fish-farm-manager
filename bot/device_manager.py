@@ -19,9 +19,9 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from bot import app_logger
-from bot.config_manager import (
-    DeviceConfig, Settings, load_profile,
-)
+from config.devices import DeviceConfig
+from config.profiles import load_profile
+from config.settings import Settings
 from bot.device_worker import DeviceWorker
 from bot.farm_event_bus import FarmEventBus
 from detection.template_bank import TemplateBank

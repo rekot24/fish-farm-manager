@@ -12,7 +12,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from typing import List
 
-from bot.config_manager import DeviceConfig, TimerConfig
+from config.devices import DeviceConfig, TimerConfig
 
 
 PROFILES = ["lead_private", "support_private", "lead_public", "support_public"]

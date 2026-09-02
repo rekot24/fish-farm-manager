@@ -21,7 +21,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Optional
 
-from bot.config_manager import HealthConfig
+from config.settings import HealthConfig
 
 
 # ---------------------------------------------------------------------------

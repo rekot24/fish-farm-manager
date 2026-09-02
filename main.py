@@ -16,7 +16,8 @@ import tkinter as tk
 from pathlib import Path
 
 from bot import app_logger
-from bot.config_manager import load_settings, load_devices, validate_settings, validate_devices
+from config.settings import load_settings, validate_settings
+from config.devices import load_devices, validate_devices
 from bot.device_manager import DeviceManager
 from ui.app import App
 

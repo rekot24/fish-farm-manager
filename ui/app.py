@@ -10,7 +10,7 @@ Layout:
 
 Workers never touch Tkinter directly.
 All UI updates happen via root.after() polling at 500ms intervals.
-All config writes go through config_manager save functions.
+All config writes go through config.settings/config.devices save functions.
 """
 
 from __future__ import annotations
@@ -23,7 +23,8 @@ from typing import List, Optional
 
 from bot import app_logger
 from bot.device_manager import DeviceManager
-from bot.config_manager import load_settings, load_devices, save_settings, save_devices
+from config.settings import load_settings, save_settings
+from config.devices import load_devices, save_devices
 from ui.device_panel import DevicePanel
 from ui.settings_dialog import SettingsDialog
 

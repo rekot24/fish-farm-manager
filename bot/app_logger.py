@@ -35,7 +35,7 @@ import logging
 import logging.handlers
 from pathlib import Path
 
-from bot.config_manager import LoggingConfig
+from config.settings import LoggingConfig
 
 
 # Module-level singleton logger — one process, one log stream.

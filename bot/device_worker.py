@@ -25,7 +25,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from bot.config_manager import DeviceConfig, Settings, ProfileConfig
+from config.devices import DeviceConfig
+from config.profiles import ProfileConfig
+from config.settings import Settings
 from bot.states import (
     STATE_IN_RUN, STATE_DEAD, STATE_LOBBY, STATE_LOADING,
     STATE_CRASHED, STATE_UNKNOWN,

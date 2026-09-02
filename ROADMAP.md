@@ -23,20 +23,22 @@ These don't block or get blocked by anything else. Good warm-up work, or fill-in
 - [x] Route through one unified function per the standard's pattern — file + UI queue + console from a single call site — rather than three separate write paths.
 - [x] Add the `logging` block to `Settings` (`enabled`, `level`, `log_to_file`, `log_to_console`, `max_file_size_mb`, `backup_count`), plus a UI section in the Settings dialog to edit it live.
 
-Landed as [bot/app_logger.py](bot/app_logger.py) (new module, wraps stdlib `logging` with `RotatingFileHandler`) + `LoggingConfig` in `bot/config_manager.py`. `App.log()` is the fork point — one call writes to `app_logger` and queues the UI display. Every `self._log(...)` call site in `device_worker.py` and `device_manager.py` was reclassified with a real level, not just given a default. `DeviceManager.reload_settings()` calls `app_logger.configure()` again so a level/console/file toggle in the Settings dialog takes effect immediately, no restart — same live-reload pattern as `HealthConfig`/`DebugConfig`.
+Landed as [bot/app_logger.py](bot/app_logger.py) (new module, wraps stdlib `logging` with `RotatingFileHandler`) + `LoggingConfig` in what was then `bot/config_manager.py` (now `config/settings.py`, since Phase 2). `App.log()` is the fork point — one call writes to `app_logger` and queues the UI display. Every `self._log(...)` call site in `device_worker.py` and `device_manager.py` was reclassified with a real level, not just given a default. `DeviceManager.reload_settings()` calls `app_logger.configure()` again so a level/console/file toggle in the Settings dialog takes effect immediately, no restart — same live-reload pattern as `HealthConfig`/`DebugConfig`.
 
 This was the single highest-value item in the audit — it's also the one the standard's own motivating scenario ("something goes wrong at 3am while the farm runs unattended") points straight at, and it's the one thing that was missing that this app's actual use case (unattended overnight runs) most needed.
 
 ---
 
-## Phase 2 — Split `config_manager.py`
+## Phase 2 — Split `config_manager.py` ✅ Done
 
-**Why here:** Phases 3 and 5 both need to add new fields to config (debug categories, promoted feature flags). Doing that inside a 392-line file that already owns settings + devices + profiles + validation makes those changes riskier and harder to review. Splitting first means every later phase adds fields to a small, single-purpose file instead of a monolith.
+**Why here:** Phases 3 and 6 both need to add new fields to config (magic-number promotions, promoted feature flags). Doing that inside a 392-line file that already owns settings + devices + profiles + validation makes those changes riskier and harder to review. Splitting first means every later phase adds fields to a small, single-purpose file instead of a monolith.
 
-- `config/settings.py` — `Settings`, `HealthConfig`, `DebugConfig`, `LoggingConfig`, load/save.
-- `config/devices.py` — `DeviceConfig`, `TimerConfig`, `DetectorConfig`, load/save, validation.
-- `config/profiles.py` — `ProfileConfig`, load/load_all.
-- Keep the public function names stable (`load_settings`, `load_devices`, etc.) so `main.py` and the UI dialogs don't need to change beyond their imports.
+- [x] `config/settings.py` — `Settings`, `HealthConfig`, `DebugConfig`, `LoggingConfig`, load/save/validate.
+- [x] `config/devices.py` — `DeviceConfig`, `TimerConfig`, `DetectorConfig`, load/save/validate.
+- [x] `config/profiles.py` — `ProfileConfig`, load/load_all (still load-only — profiles are edited by hand, not through the UI).
+- [x] Keep the public function names stable (`load_settings`, `load_devices`, etc.) so `main.py` and the UI dialogs don't need to change beyond their imports.
+
+Landed with one addition beyond the original plan: a `config/paths.py` holding the five path-resolution helpers all three files shared, rather than each getting its own copy (three copies of `_project_root()` etc. would have been the same duplication problem in a new shape). `bot/config_manager.py` deleted outright — no compatibility shim, no other consumers of it existed. All 10 files that imported from it were repointed to the right new module(s); verified with both a full-repo compile check and an import-chain + functional round-trip smoke test (`load_settings`/`load_devices`/`load_profile` against the real config files, including the 6 real configured devices).
 
 ---
 
@@ -69,7 +71,7 @@ This phase is mechanical but touches nearly every file — expect it to be the m
 
 **Depends on:** Phases 1 and 4 (there needs to be a real destination for these before deleting the `print()`s).
 
-- [bot/config_manager.py:155,229,351](bot/config_manager.py#L155) (now `config/settings.py` / `config/devices.py` / `config/profiles.py` after Phase 2) — these are free functions with no logger access today; give them a lightweight module-level logger or accept a `log_fn` parameter.
+- [config/settings.py:82](config/settings.py#L82), [config/devices.py:88](config/devices.py#L88), [config/profiles.py:72](config/profiles.py#L72) (relocated from `bot/config_manager.py` by Phase 2, unchanged otherwise) — these are free functions with no logger access today; give them a lightweight module-level logger or accept a `log_fn` parameter.
 - [ui/app.py:178](ui/app.py#L178) — the leftover resize-debug print becomes a `self._debug("ui", ...)` call or is deleted if it was scaffolding.
 
 ---

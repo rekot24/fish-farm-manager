@@ -14,7 +14,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from typing import List, Optional
 
-from bot.config_manager import DeviceConfig, TimerConfig, load_devices, save_devices
+from config.devices import DeviceConfig, TimerConfig, load_devices, save_devices
 
 PROFILES = ["support_private", "lead_private", "support_public", "lead_public"]
 

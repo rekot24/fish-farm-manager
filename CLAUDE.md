@@ -21,7 +21,7 @@ If asked to do something that conflicts with those standards, flag it before pro
 - `bot/states.py` — state constants; all state names defined here
 - `bot/actions.py` — all automated actions the bot can take (taps, resets, etc.)
 - `bot/device_manager.py` — manages the collection of connected devices
-- `bot/config_manager.py` — loads and manages per-device configuration
+- `bot/app_logger.py` — persistent logging (Layer 7): rotating `logs/app.log` + always-on `logs/errors.log`, one unified `log(msg, level)` call site
 - `bot/health_monitor.py` — monitors battery, temperature, ADB connection status
 - `bot/farm_event_bus.py` — event system for communication between components
 - `detection/detector.py` — runs template matching against captured frames
@@ -29,9 +29,14 @@ If asked to do something that conflicts with those standards, flag it before pro
 - `detection/result.py` — DetectResult data shape
 - `capture/` — screenshot capture from devices via ADB
 - `ui/app.py` — display only; never writes to workers directly
-- `config/` — settings store, per-device configs, profiles
+- `config/settings.py` — global app settings (`config/settings.json`)
+- `config/devices.py` — per-device configuration (`config/devices.json`)
+- `config/profiles.py` — behavior/logic profiles, read-only at runtime (`config/profiles/*.yaml`)
+- `config/paths.py` — shared path resolution used by the three above
 - `tools/` — ADB utilities and general helpers
 - `assets/` — template images for detection
+
+(`bot/config_manager.py` no longer exists — split into the four `config/*.py` files above as of the 2026-09-02 Phase 2 pass. If you're looking for settings/devices/profiles loading code, it's there now, not in `bot/`.)
 
 ## Device inventory
 ### Active farm devices
@@ -63,6 +68,8 @@ If asked to do something that conflicts with those standards, flag it before pro
 - [2026-09-02] Persistent logging (Layer 7) built on stdlib `logging` with `RotatingFileHandler`, wrapped in one unified `app_logger.log(msg, level)` call site, rather than hand-rolled file writing — reuses proven rotation/formatting instead of reinventing it
 - [2026-09-02] `logs/errors.log` always records ERROR/CRITICAL regardless of the `logging.enabled` master switch — a failure record must not depend on the same switch that silences routine noise
 - [2026-09-02] UI-triggered actions on a worker go through public `DeviceManager` methods (`is_device_running`, `trigger_end_run`) backed by public `DeviceWorker` methods (`request_manual_end_run`) — the UI must never call a worker's private methods or reach into `DeviceManager`'s private worker dict, per the standard's non-negotiable UI rule
+- [2026-09-02] `config_manager.py` split into `config/settings.py` / `config/devices.py` / `config/profiles.py`, with a new `config/paths.py` holding the path-resolution helpers all three share — added beyond what ROADMAP.md's Phase 2 wrote down, specifically to avoid three copies of the same `_project_root()`-style functions after the split
+- [2026-09-02] `bot/config_manager.py` deleted outright rather than kept as a re-export shim — no consumers of it exist outside this repo, so a shim would only be a second source of truth to keep in sync for no benefit
 
 ## Tried and rejected
 - [2026-08-27] Galaxy XCover Pro — GPU (Mali-G72) too weak for Roblox rendering; retired to shelf — do not re-add to active farm
@@ -72,14 +79,13 @@ If asked to do something that conflicts with those standards, flag it before pro
 ## Planned work (see ROADMAP.md for full list)
 - Per-device feature flag UI — checkboxes for every detector, action, and health response per device
 - Profile system — save/load named sets of feature flags per device
-- Split `config_manager.py` into settings/devices/profiles (ROADMAP Phase 2)
 - No magic numbers — extract timeouts, retry delays, and layout constants into named values (ROADMAP Phase 3; standing instruction 5 also calls for a dedicated `config/constants.py`, not yet created)
 - Debug layer master switch + per-category flags (ROADMAP Phase 4)
 - CLAUDE.md standing instructions compliance audit — codebase predates these standards
 
 ## Current state
-- Working: ADB connection, screenshot capture, template detection, state machine, basic actions, health monitoring, UI display, persistent logging (rotating `logs/app.log` + always-on `logs/errors.log`, real per-message levels)
-- In progress: Per-device feature flag system, profile save/load; working through ROADMAP.md's standards-compliance phases (Phase 0 and Phase 1 done, Phase 2 — splitting `config_manager.py` — is next)
+- Working: ADB connection, screenshot capture, template detection, state machine, basic actions, health monitoring, UI display, persistent logging (rotating `logs/app.log` + always-on `logs/errors.log`, real per-message levels), config loading/saving/validation split into `config/settings.py` / `config/devices.py` / `config/profiles.py` / `config/paths.py`
+- In progress: Per-device feature flag system, profile save/load; working through ROADMAP.md's standards-compliance phases (Phase 0, 1, 2 done, Phase 3 — no magic numbers — is next)
 - Known broken: Detection loop reliability — multiple behaviors running simultaneously without individual toggles makes isolation and debugging difficult
 
 ## Session log
@@ -96,6 +102,13 @@ If asked to do something that conflicts with those standards, flag it before pro
 - Phase 1 (Layer 7 logging): built the persistent logging layer end to end. New `bot/app_logger.py` (unified `log(msg, level)` call site, stdlib `logging` + `RotatingFileHandler`); new `LoggingConfig` on `Settings`; `logs/app.log` (rotating) and `logs/errors.log` (errors/criticals only, always on) confirmed with a functional smoke test (level filtering, always-on errors.log even with `enabled=False`). All ~60 existing `_log()` call sites in `device_worker.py` and `device_manager.py` reclassified with real levels — not left at a default. Settings dialog got a new Logging section; `DeviceManager.reload_settings()` reconfigures the logger live (no restart). `logs/` added to `.gitignore`.
 - Audit follow-up: user flagged a "no magic numbers" rule ahead of it landing in `app-framework.md` — audited the codebase against it, found the same ADB timeout literal duplicated independently 8+ times plus several other unnamed timeouts/thresholds/layout constants; recorded as AUDIT.md section 4 and inserted as ROADMAP.md Phase 3.
 - Modified: bot/device_worker.py, bot/device_manager.py, bot/config_manager.py, main.py, ui/app.py, ui/settings_dialog.py, .gitignore, AUDIT.md, ROADMAP.md. Added: README.md, bot/app_logger.py.
+
+### 2026-09-02 — Phase 2 (ROADMAP.md)
+- Split `bot/config_manager.py` (392 lines, three responsibilities) into `config/settings.py`, `config/devices.py`, `config/profiles.py` — same class/function names, just relocated. Added `config/paths.py` (not in the original ROADMAP.md wording) so the three don't each duplicate the same five path-resolution helpers. `bot/config_manager.py` deleted outright, no shim — confirmed via user decision, no consumers exist outside this repo.
+- Repointed all 10 files that imported from `bot.config_manager`: main.py, ui/app.py, ui/settings_dialog.py, ui/device_settings_dialog.py, ui/add_device_dialog.py, tools/image_capture_tool.py, bot/device_worker.py, bot/device_manager.py, bot/health_monitor.py, bot/app_logger.py.
+- Verified with a full-repo `py_compile` pass and a functional smoke test: imported every touched module, then ran `load_settings()` / `load_devices()` / `load_profile("lead_private")` against the real config files on disk (6 configured devices, 1 lead profile) with no errors.
+- Updated README.md, AUDIT.md, and ROADMAP.md to point at the new file locations (including the stray-`print()` line numbers, which moved with the split but are still unfixed — that's Phase 5).
+- Modified: main.py, ui/app.py, ui/settings_dialog.py, ui/device_settings_dialog.py, ui/add_device_dialog.py, tools/image_capture_tool.py, bot/device_worker.py, bot/device_manager.py, bot/health_monitor.py, bot/app_logger.py, README.md, AUDIT.md, ROADMAP.md, CLAUDE.md. Added: config/__init__.py, config/paths.py, config/settings.py, config/devices.py, config/profiles.py. Deleted: bot/config_manager.py.
 
 ---
 
