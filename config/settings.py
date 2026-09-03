@@ -23,7 +23,7 @@ from config.constants import (
     TEMP_PAUSE_POLL_S, THERMAL_THROTTLE_MULTIPLIER,
     ADB_QUICK_TIMEOUT_S, ADB_DEFAULT_TIMEOUT_S, ADB_LAUNCH_TIMEOUT_S,
     ADB_SCREENCAP_TIMEOUT_S, ADB_SCREENCAP_BATCH_TIMEOUT_S,
-    ADB_RECONNECT_SETTLE_S,
+    ADB_RECONNECT_SETTLE_S, HEALTH_CHECK_SLOW_THRESHOLD_S,
 )
 from bot import app_logger
 
@@ -50,6 +50,13 @@ class HealthConfig:
     wake_settle_s: float = WAKE_SETTLE_S
     temp_pause_poll_s: float = TEMP_PAUSE_POLL_S
     thermal_throttle_multiplier: float = THERMAL_THROTTLE_MULTIPLIER
+
+    # How slow a single HealthMonitor.check() ADB call has to be before it's
+    # logged as a WARNING (Phase 9 — see ROADMAP.md / AUDIT.md). Distinct
+    # concern from the settle/poll delays above: those are deliberate waits
+    # this app inserts; this is a threshold for detecting an ADB call taking
+    # longer than expected.
+    health_check_slow_threshold_s: float = HEALTH_CHECK_SLOW_THRESHOLD_S
 
 
 @dataclass
@@ -175,6 +182,9 @@ def load_settings() -> Settings:
             wake_settle_s=health_data.get("wake_settle_s", WAKE_SETTLE_S),
             temp_pause_poll_s=health_data.get("temp_pause_poll_s", TEMP_PAUSE_POLL_S),
             thermal_throttle_multiplier=health_data.get("thermal_throttle_multiplier", THERMAL_THROTTLE_MULTIPLIER),
+            health_check_slow_threshold_s=health_data.get(
+                "health_check_slow_threshold_s", HEALTH_CHECK_SLOW_THRESHOLD_S
+            ),
         ),
         adb=AdbConfig(
             quick_timeout_s=adb_data.get("quick_timeout_s", ADB_QUICK_TIMEOUT_S),
@@ -232,6 +242,7 @@ def save_settings(settings: Settings) -> None:
             "wake_settle_s": settings.health.wake_settle_s,
             "temp_pause_poll_s": settings.health.temp_pause_poll_s,
             "thermal_throttle_multiplier": settings.health.thermal_throttle_multiplier,
+            "health_check_slow_threshold_s": settings.health.health_check_slow_threshold_s,
         },
         "adb": {
             "quick_timeout_s": settings.adb.quick_timeout_s,

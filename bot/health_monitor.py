@@ -25,6 +25,7 @@ from config.settings import HealthConfig, AdbConfig
 from config.constants import (
     THERMAL_MILLIDEGREE_CUTOFF, MIN_PLAUSIBLE_TEMP_C, MAX_PLAUSIBLE_TEMP_C,
 )
+from bot import app_logger
 
 
 # ---------------------------------------------------------------------------
@@ -78,11 +79,23 @@ class HealthMonitor:
     def check(self) -> HealthStatus:
         """
         Run all health checks and return a HealthStatus.
-        Non-blocking — each check has its own timeout.
+        Non-blocking — each check has its own timeout. Each sub-check's
+        duration is measured and logged as a WARNING if it exceeds
+        cfg.health_check_slow_threshold_s, so a slow or hung ADB call
+        shows up in the log instead of just silently extending the scan
+        interval (Phase 9 — see ROADMAP.md / AUDIT.md).
         """
+        t0 = time.time()
         battery = self._get_battery()
+        self._log_if_slow("battery", time.time() - t0)
+
+        t0 = time.time()
         temp = self._get_temperature()
+        self._log_if_slow("temperature", time.time() - t0)
+
+        t0 = time.time()
         adb_ok = self._check_adb()
+        self._log_if_slow("ADB connectivity", time.time() - t0)
 
         # Update cache
         if battery >= 0:
@@ -113,6 +126,15 @@ class HealthMonitor:
             status.temp_critical = effective_temp > self.cfg.temp_pause_celsius
 
         return status
+
+    def _log_if_slow(self, check_name: str, elapsed_s: float) -> None:
+        """Log a WARNING if a health sub-check took longer than cfg.health_check_slow_threshold_s."""
+        if elapsed_s > self.cfg.health_check_slow_threshold_s:
+            app_logger.log(
+                f"[{self.serial[:8]}] Health check '{check_name}' took {elapsed_s:.1f}s "
+                f"(slower than {self.cfg.health_check_slow_threshold_s:.1f}s expected)",
+                "WARNING",
+            )
 
     # ------------------------------------------------------------------
     # ADB polling helpers

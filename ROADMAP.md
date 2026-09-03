@@ -141,9 +141,13 @@ Landed as `BehaviorPreset` in [config/presets.py](config/presets.py) — deliber
 
 ---
 
-## Phase 9 — Health-check visibility (opportunistic, low priority)
+## Phase 9 — Health-check visibility (opportunistic, low priority) ✅ Done
 
-**Depends on:** Phase 1 (needs the logger) and Phase 3 (the timeout/threshold values being logged should already be named by this point). Once real log levels exist, add timing/log lines around the three blocking `adb` subprocess calls in `HealthMonitor.check()` ([bot/health_monitor.py:76-79](bot/health_monitor.py#L76-L79)) so a slow or hung health check shows up in the log instead of just silently extending the scan interval.
+**Depends on:** Phase 1 (needs the logger) and Phase 3 (the timeout/threshold values being logged should already be named by this point). Once real log levels exist, add timing/log lines around the three blocking `adb` subprocess calls in `HealthMonitor.check()` so a slow or hung health check shows up in the log instead of just silently extending the scan interval.
+
+Landed as per-sub-check timing (battery, temperature, ADB connectivity individually, not an aggregate — pinpoints which call is slow) logged as `WARNING` via `app_logger.log()` — same pattern Phase 5 established for classes without a natural `log_fn`. New `HealthConfig.health_check_slow_threshold_s` (default `2.0s`, `[TUNABLE]`, `HEALTH_CHECK_SLOW_THRESHOLD_S` in `config/constants.py`) — live from day one since `HealthMonitor` already holds a `HealthConfig` reference, unlike `bot/actions.py`'s scope-boundary cases in Phase 3. Deliberately unconditional (not gated behind Phase 4's debug system) — a slow/hung health check is Layer 7's own definition of `WARNING` ("something unexpected but recoverable"), not opt-in diagnostic detail; Phase 4's `log_health` debug category already covers the opt-in *values*, this is unconditional *timing*, a different concern. No Settings-dialog row — same Phase 12 deferral as Phase 3's other `HealthConfig` additions.
+
+Verified with a functional test that actually calls the logging logic with forced elapsed times (not just asserting the threshold value round-trips) — confirmed both a slow case fires the right message with the right check name and timing, and a fast case stays silent — plus a live `check()` call and a settings round-trip.
 
 ---
 

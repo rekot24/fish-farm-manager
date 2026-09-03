@@ -110,6 +110,14 @@ WORKER_JOIN_TIMEOUT_S = 5.0
 # so a very fast iteration (elapsed ~= 0) never busy-loops.
 LOOP_SLEEP_FLOOR_S = 0.05
 
+# [TUNABLE] How long any single ADB call inside HealthMonitor.check() (battery,
+# temperature, connectivity) can take before it's logged as a WARNING —
+# meaningfully below ADB_QUICK_TIMEOUT_S (5.0s, the hard timeout those calls
+# use) so a slow device shows up in the log before it actually times out,
+# and comfortably above normal ADB latency on a healthy USB connection so
+# ordinary variance doesn't trigger it. See ROADMAP.md Phase 9 / AUDIT.md.
+HEALTH_CHECK_SLOW_THRESHOLD_S = 2.0
+
 
 # ---------------------------------------------------------------------------
 # Detection
