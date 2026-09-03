@@ -90,11 +90,21 @@ Verified with a full-repo compile pass and a functional test confirming both imp
 
 ---
 
-## Phase 6 — Promote behavior flags out of static YAML
+## Phase 6 — Promote behavior flags out of static YAML ✅ Done
 
 **Depends on:** Phase 2 (needs the config split done to add fields without further bloating one file). Related to Phase 3 — same shape of change (giving a bare value a proper home in the settings store) applied to booleans instead of numbers.
 
-Move `revive_enabled`, `disable_auto_on_death`, `save_screenshot`, `cascade_reset_on_end_run.enabled`, and `eaten_by_detection.enabled` out of `config/profiles/*.yaml` `behaviors` blocks and into `DeviceConfig` (or `Settings`, for the ones that aren't genuinely per-device). Reserve the YAML profiles for what they're actually good at — state-detection rule sets (`STATE_RULES`) — and make every one of these read live from the settings store each cycle, matching the Layer 1 rule ("checks its own enabled flag on every run, not once at startup") that the timer flags already follow correctly.
+- [x] Move `revive_enabled`, `disable_auto_on_death`, `save_screenshot`, `cascade_reset_on_end_run.enabled`, and `eaten_by_detection.enabled` out of `config/profiles/*.yaml` `behaviors` blocks and into `DeviceConfig`.
+- [x] Reserve the YAML profiles for what they're actually good at — state-detection rule sets.
+- [x] Make every one of these read live from the settings store each cycle.
+
+Before touching anything, traced every actual read of `profile.behaviors` and found the audit's list undersold the problem: most of the `behaviors:` block was already dead code (`auto_farm_reset`/`end_run_reset` stale duplicates of `TimerConfig`, and `rejoin_on_kick`/`rejoin_source`/`auto_rejoin`/`cascade_reset_on_lead_reset`/`move_to_private_on_revive_exhausted` never read anywhere, in any profile). Only three blocks were real: `cascade_reset_on_end_run`, `eaten_by_detection`, `dead_state`.
+
+Landed as two new fields on `TimerConfig` (`cascade_reset_enabled`, `cascade_reset_delay_after_lead_s` — the "reset cycle" theme fits better than a standalone class, and the reading code already lives in `device_worker.py`'s Timer logic section) and a new `DeathBehaviorConfig` on `DeviceConfig` for the other five. `load_devices()` computes profile-aware migration defaults (e.g. `eaten_by_detection_enabled` → `is_lead`) so existing `devices.json` entries keep behaving identically with zero file edits — verified against all 6 real configured devices. The `behaviors:` block is now empty in every profile YAML, so it's removed from all four files and from `ProfileConfig` itself; profiles are purely rule-set metadata now.
+
+Found and fixed in passing: `ui/device_settings_dialog.py` had the same "resets unexposed fields to their dataclass default on every save" bug as `ui/settings_dialog.py` (Phase 4) — fixed with the same `dataclasses.replace()` pattern. New fields are *not* exposed as checkboxes in either dialog — that's explicitly Phase 11's job, which already lists this phase as its prerequisite.
+
+Verified with a full-repo compile pass, assertions that every real device's migration-computed defaults exactly match its old profile-derived behavior, a `DeviceWorker` end-to-end test of the cascade-reset broadcast reading the new field, a `save_devices`/`load_devices` round-trip, and a real-Tkinter `DeviceSettingsDialog` test confirming the new fields survive a save untouched.
 
 ---
 

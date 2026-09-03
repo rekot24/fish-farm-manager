@@ -371,16 +371,13 @@ class DeviceWorker:
         self._last_end_run_reset = time.time()
 
         # Lead broadcasts cascade reset to supports
-        if self.cfg.is_lead:
-            behaviors = self.profile.behaviors
-            cascade_cfg = behaviors.get("cascade_reset_on_end_run", {})
-            if cascade_cfg.get("enabled", True):
-                delay_s = cascade_cfg.get("delay_after_lead_s", 30)
-                self.event_bus.broadcast(
-                    event={"type": EVENT_CASCADE_RESET, "delay_s": delay_s},
-                    exclude_serial=self.cfg.serial,
-                )
-                self._log(f"[{self._name()}] Cascade reset broadcast (delay={delay_s}s)")
+        if self.cfg.is_lead and self.cfg.timers.cascade_reset_enabled:
+            delay_s = self.cfg.timers.cascade_reset_delay_after_lead_s
+            self.event_bus.broadcast(
+                event={"type": EVENT_CASCADE_RESET, "delay_s": delay_s},
+                exclude_serial=self.cfg.serial,
+            )
+            self._log(f"[{self._name()}] Cascade reset broadcast (delay={delay_s}s)")
 
     # ------------------------------------------------------------------
     # State handlers
@@ -410,19 +407,18 @@ class DeviceWorker:
 
     def _handle_dead_private(self, results: dict, frame) -> None:
         """Dead state handling for private mode."""
-        behaviors = self.profile.behaviors
 
         # Debug aid: private mode never screenshots on death otherwise
         # (unlike public mode, where it's an always-on business feature —
-        # see _handle_dead_public's dead_cfg.save_screenshot). Opt-in only.
+        # see _handle_dead_public's death_behavior.save_screenshot_on_death).
+        # Opt-in only.
         if self.settings.debug.enabled and self.settings.debug.screenshot_on_event:
             self._save_death_screenshot(frame)
 
         # Lead only: eaten-by detection
-        if self.cfg.is_lead:
-            eaten_cfg = behaviors.get("eaten_by_detection", {})
-            if eaten_cfg.get("enabled") and eaten_cfg.get("trigger_support_end_run"):
-                self._check_eaten_by(frame)
+        db = self.cfg.death_behavior
+        if self.cfg.is_lead and db.eaten_by_detection_enabled and db.eaten_by_detection_trigger_support_end_run:
+            self._check_eaten_by(frame)
 
         # Navigate back to lobby
         death_result = results.get("death_screen")
@@ -436,11 +432,10 @@ class DeviceWorker:
 
     def _handle_dead_public(self, results: dict, frame) -> None:
         """Dead state handling for public mode."""
-        behaviors = self.profile.behaviors
-        dead_cfg = behaviors.get("dead_state", {})
+        db = self.cfg.death_behavior
 
         # Step 1: Turn off auto-farm (always, top priority)
-        if dead_cfg.get("disable_auto_on_death", True):
+        if db.disable_auto_on_death:
             auto_on = results.get("auto_button_on")
             if auto_on and auto_on.found:
                 offset = self._get_click_offset("auto_button_on")
@@ -451,11 +446,11 @@ class DeviceWorker:
                     self._log(f"[{self._name()}] Auto-farm turned off on death at {target}")
 
         # Step 2: Save screenshot
-        if dead_cfg.get("save_screenshot", True):
+        if db.save_screenshot_on_death:
             self._save_death_screenshot(frame)
 
         # Step 3: Revive or move to private
-        if dead_cfg.get("revive_enabled", False) and self.revives_remaining > 0:
+        if db.revive_enabled and self.revives_remaining > 0:
             revive_result = results.get("revive_button")
             if revive_result and revive_result.found:
                 offset = self._get_click_offset("revive_button")

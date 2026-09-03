@@ -3,28 +3,6 @@ role: support
 server_type: public
 status: active
 
-behaviors:
-  auto_farm_reset:
-    enabled: true
-    interval_min: 15
-
-  end_run_reset:
-    enabled: true
-    interval_min: 10
-
-  dead_state:
-    # Same priority as lead: turn off auto first, save screenshot
-    disable_auto_on_death: true
-    save_screenshot: true
-    # Supports do not revive in public — they wait for lead's move_to_private signal
-    revive_enabled: false
-
-  eaten_by_detection:
-    enabled: false
-
-  rejoin_on_kick: true
-  auto_rejoin: true
-
 detectors_required:
   - auto_button_on
   - auto_button_off

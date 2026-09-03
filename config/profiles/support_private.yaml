@@ -3,26 +3,6 @@ role: support
 server_type: private
 status: active
 
-behaviors:
-  auto_farm_reset:
-    enabled: true
-    interval_min: 15
-
-  end_run_reset:
-    enabled: true
-    interval_min: 10
-
-  cascade_reset_on_lead_reset:
-    enabled: true
-    delay_after_lead_s: 30
-
-  eaten_by_detection:
-    enabled: false    # support devices do not act on eaten-by detection
-
-  rejoin_on_kick: true
-  rejoin_source: global_settings
-  auto_rejoin: true
-
 detectors_required:
   - auto_button_on
   - auto_button_off

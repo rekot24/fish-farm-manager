@@ -8,11 +8,12 @@ Does NOT allow editing click offsets inline — those come from the Image Captur
 
 from __future__ import annotations
 
+import dataclasses
 import tkinter as tk
 from tkinter import ttk, messagebox
 from typing import List
 
-from config.devices import DeviceConfig, TimerConfig
+from config.devices import DeviceConfig
 
 
 PROFILES = ["lead_private", "support_private", "lead_public", "support_public"]
@@ -184,24 +185,26 @@ class DeviceSettingsDialog:
                     if d.serial != self.result.serial:
                         d.is_lead = False
 
-        self.result = DeviceConfig(
-            serial=self.result.serial,
+        # dataclasses.replace() off self.result rather than constructing a
+        # fresh DeviceConfig/TimerConfig — fields this dialog doesn't expose
+        # (death_behavior; timers.cascade_reset_*, added Phase 6 — see
+        # ROADMAP Phase 11 for the actual UI) carry through unchanged
+        # instead of resetting to their dataclass defaults on every save.
+        # Same bug class found and fixed in ui/settings_dialog.py Phase 4.
+        self.result = dataclasses.replace(
+            self.result,
             nickname=self._nickname.get().strip(),
-            model=self.result.model,
-            enabled=self.result.enabled,
             is_lead=self._is_lead.get(),
             profile=self._profile.get(),
             capture_backend=self._backend.get(),
             scan_interval_ms=self._scan_ms.get(),
-            detectors=self.result.detectors,
-            timers=TimerConfig(
+            timers=dataclasses.replace(
+                self.result.timers,
                 auto_farm_reset_enabled=self._auto_enabled.get(),
                 auto_farm_reset_interval_min=self._auto_interval.get(),
                 end_run_reset_enabled=self._end_enabled.get(),
                 end_run_reset_interval_min=self._end_interval.get(),
             ),
-            eaten_by_name_image=self.result.eaten_by_name_image,
-            device_image_overrides=self.result.device_image_overrides,
             revive_count=self._revive_count.get(),
             notes=self._notes.get().strip(),
         )

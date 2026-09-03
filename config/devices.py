@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List
 
 from config.paths import devices_path
+from config.constants import CASCADE_RESET_DELAY_S
 from bot import app_logger
 
 
@@ -46,6 +47,38 @@ class TimerConfig:
     end_run_reset_enabled: bool = True
     end_run_reset_interval_min: int = 10
 
+    # Cascade reset: after a lead device's end-run fires, it broadcasts a
+    # signal telling support devices to end-run too, after a delay. Only
+    # ever consulted when DeviceConfig.is_lead is True. Moved here from
+    # profile YAML's cascade_reset_on_end_run block (Phase 6 — see AUDIT.md)
+    # since it's the same "reset cycle" concept as the two settings above,
+    # and the code that reads it already lives in device_worker.py's
+    # "Timer logic" section, not its death-handling code.
+    cascade_reset_enabled: bool = True
+    cascade_reset_delay_after_lead_s: float = CASCADE_RESET_DELAY_S
+
+
+@dataclass
+class DeathBehaviorConfig:
+    """
+    What a device does when it dies. Moved from profile YAML's dead_state /
+    eaten_by_detection blocks (Phase 6 — see AUDIT.md / ROADMAP.md) so these
+    are live per-device settings, re-read every cycle, instead of loaded
+    once from a profile at worker start.
+
+    eaten_by_detection_* only ever apply to the lead device (device_worker.py
+    only checks them when DeviceConfig.is_lead is True) — kept per-device
+    rather than global since a farm could plausibly want a different lead
+    at different times, each with their own eaten-by behavior.
+    disable_auto_on_death / save_screenshot_on_death / revive_enabled only
+    apply in public mode (device_worker._handle_dead_public).
+    """
+    disable_auto_on_death: bool = True
+    save_screenshot_on_death: bool = True
+    revive_enabled: bool = False
+    eaten_by_detection_enabled: bool = False
+    eaten_by_detection_trigger_support_end_run: bool = False
+
 
 @dataclass
 class DeviceConfig:
@@ -59,6 +92,7 @@ class DeviceConfig:
     scan_interval_ms: int = 800
     detectors: Dict[str, DetectorConfig] = field(default_factory=dict)
     timers: TimerConfig = field(default_factory=TimerConfig)
+    death_behavior: DeathBehaviorConfig = field(default_factory=DeathBehaviorConfig)
     eaten_by_name_image: str = ""
     device_image_overrides: List[str] = field(default_factory=list)
     # Public mode revive counter.
@@ -99,6 +133,14 @@ def load_devices() -> List[DeviceConfig]:
                 click_offset=det_data.get("click_offset", [0, 0]),
             )
 
+        # is_lead/profile are needed below to compute migration-safe defaults
+        # for the fields Phase 6 moved off profile YAML — an entry saved
+        # before this phase won't have them, and the fallback here
+        # reproduces exactly what the old profile-derived value was for
+        # that role, so existing devices don't change behavior on upgrade.
+        is_lead = entry.get("is_lead", False)
+        profile_str = entry.get("profile", "support_private")
+
         # Parse timers — supports both old format (no enabled flags) and new
         timer_data = entry.get("timers", {})
         timers = TimerConfig(
@@ -106,6 +148,27 @@ def load_devices() -> List[DeviceConfig]:
             auto_farm_reset_interval_min=timer_data.get("auto_farm_reset_interval_min", 15),
             end_run_reset_enabled=timer_data.get("end_run_reset_enabled", True),
             end_run_reset_interval_min=timer_data.get("end_run_reset_interval_min", 10),
+            # Every profile's cascade_reset_on_end_run either matched these
+            # values or omitted the block entirely — in which case the old
+            # code's own inline default (cascade_cfg.get(..., True/30)) was
+            # already effectively True/30.0 for every device.
+            cascade_reset_enabled=timer_data.get("cascade_reset_enabled", True),
+            cascade_reset_delay_after_lead_s=timer_data.get(
+                "cascade_reset_delay_after_lead_s", CASCADE_RESET_DELAY_S
+            ),
+        )
+
+        # Parse death behavior — defaults replicate what each role's profile
+        # YAML used to set (see config/profiles/*.yaml history / AUDIT.md §2).
+        death_data = entry.get("death_behavior", {})
+        death_behavior = DeathBehaviorConfig(
+            disable_auto_on_death=death_data.get("disable_auto_on_death", True),
+            save_screenshot_on_death=death_data.get("save_screenshot_on_death", True),
+            revive_enabled=death_data.get("revive_enabled", is_lead),
+            eaten_by_detection_enabled=death_data.get("eaten_by_detection_enabled", is_lead),
+            eaten_by_detection_trigger_support_end_run=death_data.get(
+                "eaten_by_detection_trigger_support_end_run", "private" in profile_str
+            ),
         )
 
         devices.append(DeviceConfig(
@@ -113,12 +176,13 @@ def load_devices() -> List[DeviceConfig]:
             nickname=entry.get("nickname", ""),
             model=entry.get("model", ""),
             enabled=entry.get("enabled", True),
-            is_lead=entry.get("is_lead", False),
-            profile=entry.get("profile", "support_private"),
+            is_lead=is_lead,
+            profile=profile_str,
             capture_backend=entry.get("capture_backend", "scrcpy"),
             scan_interval_ms=entry.get("scan_interval_ms", 800),
             detectors=detectors,
             timers=timers,
+            death_behavior=death_behavior,
             eaten_by_name_image=entry.get("eaten_by_name_image", ""),
             device_image_overrides=entry.get("device_image_overrides", []),
             revive_count=entry.get("revive_count", 0),
@@ -166,6 +230,15 @@ def save_devices(devices: List[DeviceConfig]) -> None:
                 "auto_farm_reset_interval_min": dev.timers.auto_farm_reset_interval_min,
                 "end_run_reset_enabled": dev.timers.end_run_reset_enabled,
                 "end_run_reset_interval_min": dev.timers.end_run_reset_interval_min,
+                "cascade_reset_enabled": dev.timers.cascade_reset_enabled,
+                "cascade_reset_delay_after_lead_s": dev.timers.cascade_reset_delay_after_lead_s,
+            },
+            "death_behavior": {
+                "disable_auto_on_death": dev.death_behavior.disable_auto_on_death,
+                "save_screenshot_on_death": dev.death_behavior.save_screenshot_on_death,
+                "revive_enabled": dev.death_behavior.revive_enabled,
+                "eaten_by_detection_enabled": dev.death_behavior.eaten_by_detection_enabled,
+                "eaten_by_detection_trigger_support_end_run": dev.death_behavior.eaten_by_detection_trigger_support_end_run,
             },
             "eaten_by_name_image": dev.eaten_by_name_image,
             "device_image_overrides": dev.device_image_overrides,

@@ -1,19 +1,28 @@
 """
 config/profiles.py
 
-Behavior/logic profiles — role- and server-type-specific rule sets
-(lead_private, support_private, lead_public, support_public).
+Role- and server-type-specific state-detection rule sets (lead_private,
+support_private, lead_public, support_public) — which detectors a device
+running this profile needs, plus its role/server_type metadata.
 
 Loads from config/profiles/*.yaml. Read-only at runtime: unlike settings.py
 and devices.py, there is no save_profile() — these are edited by hand, not
 through the UI. Split out of the former bot/config_manager.py (which also
 handled settings.json and devices.json) so this file has one job.
+
+No longer carries a `behaviors` block (removed Phase 6 — see AUDIT.md /
+ROADMAP.md): every behavior flag that was actually read from it moved to
+live per-device config in config/devices.py (TimerConfig's cascade_reset_*,
+DeviceConfig.death_behavior); everything else in the old behaviors block
+was already dead code, never read by anything. Profiles are purely
+state-detection rule-set metadata now, which is what they're actually good
+at — the state-machine rules themselves live in bot/state_rules.py.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Dict, List
 
 import yaml
 
@@ -31,7 +40,6 @@ class ProfileConfig:
     role: str = "support"              # "lead" or "support"
     server_type: str = "private"       # "private" or "public"
     status: str = "active"             # "active" or "stub"
-    behaviors: Dict[str, Any] = field(default_factory=dict)
     detectors_required: List[str] = field(default_factory=list)
 
 
@@ -57,7 +65,6 @@ def load_profile(profile_name: str) -> ProfileConfig:
         role=data.get("role", "support"),
         server_type=data.get("server_type", "private"),
         status=data.get("status", "active"),
-        behaviors=data.get("behaviors", {}),
         detectors_required=data.get("detectors_required", []),
     )
 

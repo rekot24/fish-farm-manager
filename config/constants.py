@@ -140,6 +140,18 @@ MAX_PLAUSIBLE_TEMP_C = 120
 
 
 # ---------------------------------------------------------------------------
+# Device behavior (config/devices.py's TimerConfig) — moved off profile YAML
+# in Phase 6 (see AUDIT.md / ROADMAP.md), where this was a bare `30` default
+# already baked into the Python code (`cascade_cfg.get("delay_after_lead_s",
+# 30)`) rather than the value the (unused) YAML block claimed to set.
+# ---------------------------------------------------------------------------
+
+# [TUNABLE] How long a support device waits after receiving a cascade-reset
+# signal from the lead before firing its own end-run.
+CASCADE_RESET_DELAY_S = 30.0
+
+
+# ---------------------------------------------------------------------------
 # Misc
 # ---------------------------------------------------------------------------
 
