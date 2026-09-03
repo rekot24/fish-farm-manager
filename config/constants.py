@@ -150,6 +150,15 @@ MAX_PLAUSIBLE_TEMP_C = 120
 # signal from the lead before firing its own end-run.
 CASCADE_RESET_DELAY_S = 30.0
 
+# [INTERNAL] DeviceConfig.role values. Named to replace the bare string
+# literals "lead"/"support" that would otherwise be scattered across every
+# role comparison — magic strings are exactly as much a Layer-5/instruction-5
+# concern as magic numbers. Renamed from DeviceConfig.is_lead: bool (Phase 8
+# — see AUDIT.md / ROADMAP.md / CLAUDE.md) at the user's request, so role can
+# grow beyond a boolean later without another rename.
+ROLE_LEAD = "lead"
+ROLE_SUPPORT = "support"
+
 
 # ---------------------------------------------------------------------------
 # Misc

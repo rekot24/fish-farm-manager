@@ -14,6 +14,8 @@ import tkinter as tk
 from tkinter import ttk
 from typing import Callable, Optional
 
+from config.constants import ROLE_LEAD, ROLE_SUPPORT
+
 
 def _fmt_countdown(seconds: float) -> str:
     """Format a countdown in seconds as MM:SS."""
@@ -108,18 +110,18 @@ class DevicePanel(ttk.Frame):
 
     def update(self, status: dict, timer_info: Optional[dict]) -> None:
         """Refresh all labels from a fresh status dict."""
-        is_lead = status.get("is_lead", False)
+        role = status.get("role", ROLE_SUPPORT)
         nickname = status.get("nickname") or status.get("serial", "Unknown")[:12]
         profile = status.get("profile", "")
-        role = "LEAD" if is_lead else "SUPP"
+        role_label = "LEAD" if role == ROLE_LEAD else "SUPP"
         state = status.get("state", "UNKNOWN")
         running = status.get("running", False)
         battery = status.get("battery", -1)
         temp = status.get("temp", -1.0)
 
-        self._lbl_lead.config(text="★" if is_lead else "  ")
+        self._lbl_lead.config(text="★" if role == ROLE_LEAD else "  ")
         self._lbl_name.config(text=nickname)
-        self._lbl_role.config(text=f"{role}  {profile}")
+        self._lbl_role.config(text=f"{role_label}  {profile}")
         self._lbl_state.config(text=state, bg=_state_color(state))
 
         # Health display

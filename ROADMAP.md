@@ -125,11 +125,19 @@ Verified by actually triggering exceptions at runtime, not just asserting config
 
 ---
 
-## Phase 8 — Feature-flag profile snapshot/restore
+## Phase 8 — Feature-flag profile snapshot/restore ✅ Done
 
 **Depends on:** Phase 6. Snapshotting only makes sense once the flags it would snapshot are actually centralized and live in the settings/device store — building this against the current static-YAML setup would mean redoing it once Phase 6 lands.
 
 Add the standard's actual "Profile" concept: save the current set of feature-flag states under a name, restore it later. This is additive, not a replacement for the existing `lead_private`/`support_private`/etc. YAML profiles, which are a different (and valid) concept — state-detection rule sets — that just happen to share the word "profile."
+
+Landed as `BehaviorPreset` in [config/presets.py](config/presets.py) — deliberately not called "profile" in code, to avoid exactly the collision this item's own description warns about (`config/profiles.py` already owns that word for rule sets). Snapshots `TimerConfig` + `DeathBehaviorConfig` only; `save_preset`/`load_preset`/`load_all_presets`/`delete_preset`/`list_preset_names`/`apply_preset`, all `dataclasses.replace()`-based. No presets shipped by default — this is the data layer Phase 11's Save-as/Load buttons call into, not the UI itself.
+
+**Scope addition mid-phase, at the user's request:** `DeviceConfig.is_lead: bool` renamed to `role: str` (`ROLE_LEAD`/`ROLE_SUPPORT` in `config/constants.py`) throughout the codebase — every read site in `bot/device_worker.py`, `bot/device_manager.py`, both UI dialogs, `ui/device_panel.py`, plus validation and the migration path in `load_devices()` for entries with a legacy `is_lead` boolean. Before making the change, traced every actual read of `is_lead`/`role`/`server_type` in the codebase to confirm excluding `role` from `BehaviorPreset` couldn't strip any role-gated bot-loop logic — it can't, since every such decision lives in the code that reads `DeviceConfig.role`, never in the snapshotted fields. Also removed `ProfileConfig.role` (a same-named, confirmed-dead field that would have been a landmine sitting next to the new authoritative one) and the corresponding `role:` line from all four profile YAML files.
+
+**Phase 11 requirement captured for later, not built now:** when role is lead, lead-only behavior options (`eaten_by_detection_*`, `cascade_reset_*`) should become visible/active in the per-device checkbox UI; when support, they hide. Role itself stays out of `BehaviorPreset` — it's device identity, not a behavior to snapshot. See CLAUDE.md.
+
+**Incident during this phase, not caused by the rename:** while testing, found that `config/devices.json` and `config/settings.json` — the real, gitignored files — had been silently overwritten by earlier phases' test scripts (Phase 6 for devices.json; Phase 3 and Phase 7 for settings.json). Root cause: those tests patched `config.paths.X_path` to isolate themselves, but `config/devices.py`/`config/settings.py` each do `from config.paths import X_path`, binding their own copy of the name at import time — patching the origin module doesn't touch that bound copy, so the "isolated" test's `save_*()` call silently hit the real file. Full writeup, recovery actions taken, and the testing-methodology fix are in CLAUDE.md's session log and key decisions — including two new committed recovery aids (`config/settings.example.json`, `config/devices.example.json`) added directly because of this.
 
 ---
 

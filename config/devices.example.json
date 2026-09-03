@@ -1,0 +1,32 @@
+[
+  {
+    "serial": "EXAMPLE0000SERIAL",
+    "nickname": "Example Device",
+    "model": "",
+    "enabled": true,
+    "role": "support",
+    "profile": "support_private",
+    "capture_backend": "scrcpy",
+    "scan_interval_ms": 800,
+    "detectors": {},
+    "timers": {
+      "auto_farm_reset_enabled": true,
+      "auto_farm_reset_interval_min": 15,
+      "end_run_reset_enabled": true,
+      "end_run_reset_interval_min": 10,
+      "cascade_reset_enabled": true,
+      "cascade_reset_delay_after_lead_s": 30.0
+    },
+    "death_behavior": {
+      "disable_auto_on_death": true,
+      "save_screenshot_on_death": true,
+      "revive_enabled": false,
+      "eaten_by_detection_enabled": false,
+      "eaten_by_detection_trigger_support_end_run": false
+    },
+    "eaten_by_name_image": "",
+    "device_image_overrides": [],
+    "revive_count": 0,
+    "notes": "Placeholder entry showing the expected structure. role is \"lead\" or \"support\" — exactly one device should be \"lead\". Delete this entry and use the app's Add Devices dialog to scan for real ADB-connected devices instead of hand-editing serials here."
+  }
+]

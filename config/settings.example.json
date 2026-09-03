@@ -1,0 +1,50 @@
+{
+  "adb_path": "C:/path/to/platform-tools/adb.exe",
+  "scan_interval_ms": 800,
+  "template_confidence_default": 0.82,
+  "private_server_link": "",
+  "capture_backend_default": "scrcpy",
+  "development_mode": false,
+  "health": {
+    "battery_min_percent": 20,
+    "battery_resume_percent": 80,
+    "temp_throttle_celsius": 45.0,
+    "temp_pause_celsius": 52.0,
+    "temp_resume_celsius": 40.0,
+    "adb_reconnect_interval_s": 10,
+    "crash_detect_after_s": 60.0,
+    "crash_recovery_settle_s": 3.0,
+    "battery_sleep_settle_s": 1.0,
+    "battery_sleep_poll_s": 60.0,
+    "wake_settle_s": 10.0,
+    "temp_pause_poll_s": 30.0,
+    "thermal_throttle_multiplier": 2.0
+  },
+  "adb": {
+    "quick_timeout_s": 5.0,
+    "default_timeout_s": 10.0,
+    "launch_timeout_s": 15.0,
+    "screencap_timeout_s": 8.0,
+    "screencap_batch_timeout_s": 15.0,
+    "reconnect_settle_s": 2.0
+  },
+  "debug": {
+    "enabled": false,
+    "log_state_changes": true,
+    "log_detections": false,
+    "log_actions": false,
+    "log_health": false,
+    "log_config_reads": false,
+    "screenshot_on_event": false,
+    "save_failed_captures": true,
+    "screenshot_dir": "debug_shots"
+  },
+  "logging": {
+    "enabled": true,
+    "level": "INFO",
+    "log_to_file": true,
+    "log_to_console": true,
+    "max_file_size_mb": 10,
+    "backup_count": 3
+  }
+}

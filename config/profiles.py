@@ -17,6 +17,13 @@ DeviceConfig.death_behavior); everything else in the old behaviors block
 was already dead code, never read by anything. Profiles are purely
 state-detection rule-set metadata now, which is what they're actually good
 at — the state-machine rules themselves live in bot/state_rules.py.
+
+Also no longer carries a `role` field (removed Phase 8 — see AUDIT.md /
+ROADMAP.md / CLAUDE.md): it duplicated DeviceConfig.role in name and value
+domain but was never actually read by anything — every role-gated decision
+in the bot loop already checked DeviceConfig.role, not this one. Keeping a
+same-named, dead field next to the new authoritative one would have been a
+landmine for a future reader.
 """
 
 from __future__ import annotations
@@ -37,7 +44,6 @@ from bot import app_logger
 @dataclass
 class ProfileConfig:
     profile_name: str = ""
-    role: str = "support"              # "lead" or "support"
     server_type: str = "private"       # "private" or "public"
     status: str = "active"             # "active" or "stub"
     detectors_required: List[str] = field(default_factory=list)
@@ -62,7 +68,6 @@ def load_profile(profile_name: str) -> ProfileConfig:
 
     return ProfileConfig(
         profile_name=data.get("profile_name", profile_name),
-        role=data.get("role", "support"),
         server_type=data.get("server_type", "private"),
         status=data.get("status", "active"),
         detectors_required=data.get("detectors_required", []),

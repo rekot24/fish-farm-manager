@@ -14,6 +14,7 @@ from tkinter import ttk, messagebox
 from typing import List
 
 from config.devices import DeviceConfig
+from config.constants import ROLE_LEAD, ROLE_SUPPORT
 
 
 PROFILES = ["lead_private", "support_private", "lead_public", "support_public"]
@@ -37,7 +38,9 @@ class DeviceSettingsDialog:
         self._nickname   = tk.StringVar(value=device_cfg.nickname)
         self._notes      = tk.StringVar(value=device_cfg.notes)
         self._profile    = tk.StringVar(value=device_cfg.profile)
-        self._is_lead    = tk.BooleanVar(value=device_cfg.is_lead)
+        # Checkbox widget stays boolean — device_cfg.role (ROLE_LEAD/ROLE_SUPPORT)
+        # converts to/from it at the load/save boundary below.
+        self._role_is_lead = tk.BooleanVar(value=device_cfg.role == ROLE_LEAD)
         self._backend    = tk.StringVar(value=device_cfg.capture_backend)
         self._scan_ms    = tk.IntVar(value=device_cfg.scan_interval_ms)
 
@@ -96,7 +99,7 @@ class DeviceSettingsDialog:
         f = ttk.Frame(outer)
         f.pack(fill="x", pady=3)
         ttk.Label(f, text="Is Lead Device:", width=26, anchor="w").pack(side="left")
-        ttk.Checkbutton(f, variable=self._is_lead).pack(side="left")
+        ttk.Checkbutton(f, variable=self._role_is_lead).pack(side="left")
         ttk.Label(f, text="(only one device may be lead)",
                   foreground="#888888").pack(side="left", padx=(6, 0))
 
@@ -166,11 +169,13 @@ class DeviceSettingsDialog:
                    command=self.top.destroy).pack(side="left")
 
     def _save(self) -> None:
+        new_role = ROLE_LEAD if self._role_is_lead.get() else ROLE_SUPPORT
+
         # Enforce one-lead rule
-        if self._is_lead.get():
+        if new_role == ROLE_LEAD:
             other_leads = [
                 d for d in self.all_devices
-                if d.is_lead and d.serial != self.result.serial
+                if d.role == ROLE_LEAD and d.serial != self.result.serial
             ]
             if other_leads:
                 names = ", ".join(d.nickname or d.serial for d in other_leads)
@@ -183,7 +188,7 @@ class DeviceSettingsDialog:
                     return
                 for d in self.all_devices:
                     if d.serial != self.result.serial:
-                        d.is_lead = False
+                        d.role = ROLE_SUPPORT
 
         # dataclasses.replace() off self.result rather than constructing a
         # fresh DeviceConfig/TimerConfig — fields this dialog doesn't expose
@@ -194,7 +199,7 @@ class DeviceSettingsDialog:
         self.result = dataclasses.replace(
             self.result,
             nickname=self._nickname.get().strip(),
-            is_lead=self._is_lead.get(),
+            role=new_role,
             profile=self._profile.get(),
             capture_backend=self._backend.get(),
             scan_interval_ms=self._scan_ms.get(),

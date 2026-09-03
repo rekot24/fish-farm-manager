@@ -45,6 +45,7 @@ from detection.detector import run_all_detectors, find_by_path
 from detection.template_bank import TemplateBank
 from config.constants import (
     WORKER_JOIN_TIMEOUT_S, LOOP_SLEEP_FLOOR_S, SECONDS_PER_MINUTE,
+    ROLE_LEAD,
 )
 
 
@@ -381,7 +382,7 @@ class DeviceWorker:
         self._last_end_run_reset = time.time()
 
         # Lead broadcasts cascade reset to supports
-        if self.cfg.is_lead and self.cfg.timers.cascade_reset_enabled:
+        if self.cfg.role == ROLE_LEAD and self.cfg.timers.cascade_reset_enabled:
             delay_s = self.cfg.timers.cascade_reset_delay_after_lead_s
             self.event_bus.broadcast(
                 event={"type": EVENT_CASCADE_RESET, "delay_s": delay_s},
@@ -427,7 +428,7 @@ class DeviceWorker:
 
         # Lead only: eaten-by detection
         db = self.cfg.death_behavior
-        if self.cfg.is_lead and db.eaten_by_detection_enabled and db.eaten_by_detection_trigger_support_end_run:
+        if self.cfg.role == ROLE_LEAD and db.eaten_by_detection_enabled and db.eaten_by_detection_trigger_support_end_run:
             self._check_eaten_by(frame)
 
         # Navigate back to lobby
@@ -479,7 +480,7 @@ class DeviceWorker:
             self._log(
                 f"[{self._name()}] Revives exhausted ({self.revives_remaining}), moving to private"
             )
-            self._move_to_private(broadcast=self.cfg.is_lead)
+            self._move_to_private(broadcast=self.cfg.role == ROLE_LEAD)
 
     def _move_to_private(self, broadcast: bool = False) -> None:
         """Join the private server and optionally broadcast the signal to supports."""
@@ -552,7 +553,7 @@ class DeviceWorker:
         """
         support_devices = [
             d for d in self.all_devices
-            if not d.is_lead and d.serial != self.cfg.serial
+            if d.role != ROLE_LEAD and d.serial != self.cfg.serial
         ]
 
         for dev in support_devices:

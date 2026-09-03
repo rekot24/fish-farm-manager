@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List
 
 from config.paths import devices_path
-from config.constants import CASCADE_RESET_DELAY_S
+from config.constants import CASCADE_RESET_DELAY_S, ROLE_LEAD, ROLE_SUPPORT
 from bot import app_logger
 
 
@@ -49,7 +49,7 @@ class TimerConfig:
 
     # Cascade reset: after a lead device's end-run fires, it broadcasts a
     # signal telling support devices to end-run too, after a delay. Only
-    # ever consulted when DeviceConfig.is_lead is True. Moved here from
+    # ever consulted when DeviceConfig.role == ROLE_LEAD. Moved here from
     # profile YAML's cascade_reset_on_end_run block (Phase 6 — see AUDIT.md)
     # since it's the same "reset cycle" concept as the two settings above,
     # and the code that reads it already lives in device_worker.py's
@@ -67,7 +67,7 @@ class DeathBehaviorConfig:
     once from a profile at worker start.
 
     eaten_by_detection_* only ever apply to the lead device (device_worker.py
-    only checks them when DeviceConfig.is_lead is True) — kept per-device
+    only checks them when DeviceConfig.role == ROLE_LEAD) — kept per-device
     rather than global since a farm could plausibly want a different lead
     at different times, each with their own eaten-by behavior.
     disable_auto_on_death / save_screenshot_on_death / revive_enabled only
@@ -86,7 +86,7 @@ class DeviceConfig:
     nickname: str = ""
     model: str = ""
     enabled: bool = True
-    is_lead: bool = False
+    role: str = ROLE_SUPPORT  # ROLE_LEAD or ROLE_SUPPORT — renamed from is_lead: bool (Phase 8)
     profile: str = "support_private"
     capture_backend: str = "scrcpy"           # "scrcpy" or "adb"
     scan_interval_ms: int = 800
@@ -133,12 +133,19 @@ def load_devices() -> List[DeviceConfig]:
                 click_offset=det_data.get("click_offset", [0, 0]),
             )
 
-        # is_lead/profile are needed below to compute migration-safe defaults
+        # role/profile are needed below to compute migration-safe defaults
         # for the fields Phase 6 moved off profile YAML — an entry saved
         # before this phase won't have them, and the fallback here
         # reproduces exactly what the old profile-derived value was for
         # that role, so existing devices don't change behavior on upgrade.
-        is_lead = entry.get("is_lead", False)
+        #
+        # role itself has the same kind of migration: entries saved before
+        # Phase 8 have a legacy is_lead boolean instead of role — migrate
+        # transparently rather than requiring a hand-edit of devices.json.
+        if "role" in entry:
+            role = entry.get("role", ROLE_SUPPORT)
+        else:
+            role = ROLE_LEAD if entry.get("is_lead", False) else ROLE_SUPPORT
         profile_str = entry.get("profile", "support_private")
 
         # Parse timers — supports both old format (no enabled flags) and new
@@ -164,8 +171,8 @@ def load_devices() -> List[DeviceConfig]:
         death_behavior = DeathBehaviorConfig(
             disable_auto_on_death=death_data.get("disable_auto_on_death", True),
             save_screenshot_on_death=death_data.get("save_screenshot_on_death", True),
-            revive_enabled=death_data.get("revive_enabled", is_lead),
-            eaten_by_detection_enabled=death_data.get("eaten_by_detection_enabled", is_lead),
+            revive_enabled=death_data.get("revive_enabled", role == ROLE_LEAD),
+            eaten_by_detection_enabled=death_data.get("eaten_by_detection_enabled", role == ROLE_LEAD),
             eaten_by_detection_trigger_support_end_run=death_data.get(
                 "eaten_by_detection_trigger_support_end_run", "private" in profile_str
             ),
@@ -176,7 +183,7 @@ def load_devices() -> List[DeviceConfig]:
             nickname=entry.get("nickname", ""),
             model=entry.get("model", ""),
             enabled=entry.get("enabled", True),
-            is_lead=is_lead,
+            role=role,
             profile=profile_str,
             capture_backend=entry.get("capture_backend", "scrcpy"),
             scan_interval_ms=entry.get("scan_interval_ms", 800),
@@ -199,7 +206,7 @@ def save_devices(devices: List[DeviceConfig]) -> None:
     Note: revive_count is saved as the configured starting maximum.
     The live session count is never written back.
     """
-    lead_count = sum(1 for d in devices if d.is_lead)
+    lead_count = sum(1 for d in devices if d.role == ROLE_LEAD)
     if lead_count > 1:
         raise ValueError(f"Cannot save: {lead_count} devices marked as lead. Only 1 allowed.")
 
@@ -220,7 +227,7 @@ def save_devices(devices: List[DeviceConfig]) -> None:
             "nickname": dev.nickname,
             "model": dev.model,
             "enabled": dev.enabled,
-            "is_lead": dev.is_lead,
+            "role": dev.role,
             "profile": dev.profile,
             "capture_backend": dev.capture_backend,
             "scan_interval_ms": dev.scan_interval_ms,
@@ -260,7 +267,7 @@ def validate_devices(devices: List[DeviceConfig]) -> List[str]:
     Returns a list of warning strings (empty = all good).
     """
     warnings = []
-    lead_count = sum(1 for d in devices if d.is_lead)
+    lead_count = sum(1 for d in devices if d.role == ROLE_LEAD)
 
     if lead_count == 0:
         warnings.append("No lead device configured. Private mode cascade reset and eaten-by detection will not work.")
@@ -268,10 +275,13 @@ def validate_devices(devices: List[DeviceConfig]) -> List[str]:
         warnings.append(f"Multiple lead devices configured ({lead_count}). Only one is allowed.")
 
     valid_profiles = {"lead_private", "support_private", "lead_public", "support_public"}
+    valid_roles = {ROLE_LEAD, ROLE_SUPPORT}
     for dev in devices:
         if dev.profile not in valid_profiles:
             warnings.append(f"Device '{dev.nickname or dev.serial}' has unknown profile: '{dev.profile}'")
-        if dev.is_lead and "support" in dev.profile:
+        if dev.role not in valid_roles:
+            warnings.append(f"Device '{dev.nickname or dev.serial}' has unknown role: '{dev.role}'")
+        if dev.role == ROLE_LEAD and "support" in dev.profile:
             warnings.append(f"Device '{dev.nickname or dev.serial}' is marked as lead but has a support profile.")
         if not dev.serial:
             warnings.append(f"Device '{dev.nickname}' has no serial number set.")

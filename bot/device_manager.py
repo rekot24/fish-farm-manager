@@ -201,7 +201,7 @@ class DeviceManager:
                 statuses.append({
                     "serial": dev_cfg.serial,
                     "nickname": dev_cfg.nickname,
-                    "is_lead": dev_cfg.is_lead,
+                    "role": dev_cfg.role,
                     "profile": dev_cfg.profile,
                     "running": True,
                     "state": worker.current_state,
@@ -215,7 +215,7 @@ class DeviceManager:
                 statuses.append({
                     "serial": dev_cfg.serial,
                     "nickname": dev_cfg.nickname,
-                    "is_lead": dev_cfg.is_lead,
+                    "role": dev_cfg.role,
                     "profile": dev_cfg.profile,
                     "running": False,
                     "state": "STOPPED",

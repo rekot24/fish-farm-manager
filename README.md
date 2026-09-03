@@ -8,12 +8,21 @@ See [`BeFish_FarmManager_Plan.md`](BeFish_FarmManager_Plan.md) for the original 
 
 ## Running it
 
+`config/settings.json` and `config/devices.json` are gitignored — they hold a real ADB path, your private server link, and real device serials, none of which belong in version control. On a fresh clone, create them from the committed templates before first run:
+
+```
+cp config/settings.example.json config/settings.json
+cp config/devices.example.json config/devices.json
+```
+
+`devices.example.json` ships with one placeholder entry showing the expected structure — delete it once you've used **+ Add Devices** in the UI to scan for real ADB-connected devices, rather than hand-editing serials into the file. These templates are also the recovery path if either real file is ever lost or corrupted — restore from the example, then reconfigure through the UI.
+
 ```
 pip install -r requirements.txt
 python main.py
 ```
 
-Requires `adb` (Android Platform Tools) and, for the primary capture backend, `scrcpy` — paths to both are set in `config/settings.json` (`adb_path`, `scrcpy_path`). First run: use **+ Add Devices** in the UI to scan connected ADB devices and configure them (role, profile, detector images, timers).
+Requires `adb` (Android Platform Tools) and, for the primary capture backend, `scrcpy` — the ADB path is set in `config/settings.json` (`adb_path`); scrcpy itself just needs to be reachable however your system normally resolves it. First run: use **+ Add Devices** in the UI to scan connected ADB devices and configure them (role, profile, detector images, timers).
 
 ## What each folder does
 

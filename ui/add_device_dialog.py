@@ -15,7 +15,7 @@ from tkinter import ttk, messagebox
 from typing import List, Optional
 
 from config.devices import DeviceConfig, TimerConfig, load_devices, save_devices
-from config.constants import ADB_DEFAULT_TIMEOUT_S
+from config.constants import ADB_DEFAULT_TIMEOUT_S, ROLE_LEAD, ROLE_SUPPORT
 
 PROFILES = ["support_private", "lead_private", "support_public", "lead_public"]
 
@@ -147,8 +147,8 @@ class AddDeviceDialog:
 
         # Enforce one-lead rule across existing + new
         existing = load_devices()
-        existing_has_lead = any(d.is_lead for d in existing)
-        new_leads = [r for r in selected if r.is_lead.get()]
+        existing_has_lead = any(d.role == ROLE_LEAD for d in existing)
+        new_leads = [r for r in selected if r.role_is_lead.get()]
 
         if existing_has_lead and new_leads:
             names = ", ".join(r.serial[:12] for r in new_leads)
@@ -174,12 +174,12 @@ class AddDeviceDialog:
         for row in selected:
             nickname = row.nickname.get().strip() or row.serial[:12]
             profile = row.profile.get()
-            is_lead = row.is_lead.get()
+            role = ROLE_LEAD if row.role_is_lead.get() else ROLE_SUPPORT
 
             # Auto-correct profile/lead mismatch
-            if is_lead and "support" in profile:
+            if role == ROLE_LEAD and "support" in profile:
                 profile = "lead_private"
-            if not is_lead and "lead" in profile:
+            if role == ROLE_SUPPORT and "lead" in profile:
                 profile = "support_private"
 
             new_cfgs.append(DeviceConfig(
@@ -187,7 +187,7 @@ class AddDeviceDialog:
                 nickname=nickname,
                 model="",
                 enabled=True,
-                is_lead=is_lead,
+                role=role,
                 profile=profile,
                 capture_backend="scrcpy",
                 scan_interval_ms=800,
@@ -216,7 +216,9 @@ class _DeviceRow(ttk.Frame):
         self.include = tk.BooleanVar(value=True)
         self.nickname = tk.StringVar(value="")
         self.profile = tk.StringVar(value="support_private")
-        self.is_lead = tk.BooleanVar(value=False)
+        # Checkbox widget stays boolean; converted to ROLE_LEAD/ROLE_SUPPORT
+        # in _add_selected() when the DeviceConfig is actually built.
+        self.role_is_lead = tk.BooleanVar(value=False)
 
         ttk.Checkbutton(self, variable=self.include, width=2).pack(side="left")
         ttk.Label(self, text=serial[:20], width=20,
@@ -226,5 +228,5 @@ class _DeviceRow(ttk.Frame):
         ttk.Combobox(self, textvariable=self.profile,
                      values=PROFILES, state="readonly",
                      width=16).pack(side="left", padx=(8, 0))
-        ttk.Checkbutton(self, variable=self.is_lead,
+        ttk.Checkbutton(self, variable=self.role_is_lead,
                         width=4).pack(side="left", padx=(8, 0))
