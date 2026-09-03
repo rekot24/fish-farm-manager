@@ -74,7 +74,7 @@ You flagged this rule verbally: *no raw numeric literal sits in the middle of co
 - [x] **Minutes-to-seconds conversions.** — Fixed. `SECONDS_PER_MINUTE` in `config/constants.py`, `[INTERNAL]`, used at all four sites.
 - [x] **Misc retry/backoff sleeps in `capture/scrcpy_socket.py`** — Fixed, and expanded beyond the original two: while implementing this, found and named four more bare literals in the same file that the original audit pass didn't catch (`SCRCPY_PORT_RANGE_SIZE`, `SCRCPY_DECODE_THREAD_JOIN_TIMEOUT_S`, `SCRCPY_TEARDOWN_TIMEOUT_S`, `SCRCPY_SOCKET_CONNECT_ATTEMPT_TIMEOUT_S`), all `[INTERNAL]` in `config/constants.py`.
 
-All new constants in `config/constants.py` carry a `[TUNABLE]`/`[INTERNAL]` tag per the refined standing instruction 5 (added mid-session, ahead of it landing in `app-framework.md`). `[TUNABLE]` ones are named+tagged now; only some are wired into a *live* settings field yet (see the ADB-timeout scope note above) — full settings-store wiring for the rest, plus the actual Settings-dialog UI rows for all of them, is ROADMAP.md Phase 12, tracked separately from this item.
+All new constants in `config/constants.py` carry a `[TUNABLE]`/`[INTERNAL]` tag per the refined standing instruction 5 (added mid-session, ahead of it landing in `app-framework.md`). `[TUNABLE]` ones are named+tagged, and as of ROADMAP.md Phase 12 every one of them (except the per-device `CASCADE_RESET_DELAY_S`, already UI-exposed in Phase 11) has both a live settings-store field and a row in the Settings dialog. `SCRCPY_SERVER_BIND_SETTLE_S`'s tag/prose contradiction (tagged `[TUNABLE]`, prose said "left `[INTERNAL]`") was caught and corrected to `[INTERNAL]` during Phase 12, before it could be mistakenly swept into the UI pass.
 
 ---
 

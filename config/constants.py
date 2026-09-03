@@ -189,12 +189,12 @@ SECONDS_PER_MINUTE = 60
 # enough for 100 simultaneous devices without collision.
 SCRCPY_PORT_RANGE_SIZE = 100
 
-# [TUNABLE] Pause after starting the scrcpy server process on-device, before
-# attempting the local socket connection — gives it a moment to bind.
-# Left [INTERNAL] rather than wired to a live settings field this phase:
-# doing so would mean threading a new parameter through make_backend() and
-# DeviceWorker's backend construction for one capture-backend-internal delay
-# — more plumbing than this phase's scope. Revisit if it needs tuning.
+# [INTERNAL] Pause after starting the scrcpy server process on-device, before
+# attempting the local socket connection — gives it a moment to bind. Not
+# wired to a live settings field: doing so would mean threading a new
+# parameter through make_backend() and DeviceWorker's backend construction
+# for one capture-backend-internal delay — more plumbing than its value to a
+# user. Revisit (and re-tag [TUNABLE]) if it turns out to need tuning.
 SCRCPY_SERVER_BIND_SETTLE_S = 0.5
 
 # [INTERNAL] How long to wait for the background decode thread to exit

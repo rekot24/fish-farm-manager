@@ -179,13 +179,21 @@ Verified with a real-Tkinter test exercising the actual reactivity, not just wid
 
 ---
 
-## Phase 12 — Surface `[TUNABLE]` constants in the Settings dialog
+## Phase 12 — Surface `[TUNABLE]` constants in the Settings dialog ✅ Done
 
 **Depends on:** Phase 3. This is a distinct UI surface from Phase 11 — Phase 11 is per-device boolean feature flags (detectors/actions/health responses, one checkbox panel per device); this phase is global numeric/threshold values (timeouts, retry delays, the thermal-throttle multiplier, etc.) in the one global Settings dialog, the same place `HealthConfig`/`DebugConfig`/`LoggingConfig` fields already live. The two don't block each other and can happen in either order.
 
-- For every constant in `config/constants.py` tagged `[TUNABLE]` (standing instruction 5 in CLAUDE.md — every constant is tagged `[TUNABLE]` or `[INTERNAL]` when it's created in Phase 3), add a field to the relevant config dataclass (`Settings` or one of its nested configs, following the pattern `LoggingConfig` already established) and a corresponding row in `ui/settings_dialog.py`.
-- Skip every `[INTERNAL]` constant entirely — by definition, it has no meaningful user context and should never surface in the UI.
-- Mechanical once Phase 3's tagging exists: the tag on each constant is the checklist for this phase, not a judgment call made fresh here.
+- [x] For every constant in `config/constants.py` tagged `[TUNABLE]`, add a field to the relevant config dataclass and a corresponding row in `ui/settings_dialog.py`.
+- [x] Skip every `[INTERNAL]` constant entirely.
+- [x] Mechanical once Phase 3's tagging exists — confirmed true.
+
+**Housekeeping fix first:** `SCRCPY_SERVER_BIND_SETTLE_S`'s comment was tagged `[TUNABLE]` but its own prose said *"Left `[INTERNAL]` rather than wired to a live settings field this phase"* — a leftover Phase 3 contradiction that would have wrongly pulled it into this phase's checklist. Corrected the tag to `[INTERNAL]`, matching its documented intent, before doing the pass.
+
+**Scope finding:** every remaining `[TUNABLE]` constant already had a live backing field on `HealthConfig`/`AdbConfig` from Phases 3/6/9 — `config/settings.py`'s dataclasses, `load_settings()`, and `save_settings()` needed zero changes. This phase was purely `ui/settings_dialog.py` work: 14 new rows (6 `AdbConfig` timeout fields, 8 `HealthConfig` recovery/timing fields) that had constants and live settings-store plumbing since Phase 3/9 but no UI row until now. One exclusion: `CASCADE_RESET_DELAY_S` backs `TimerConfig.cascade_reset_delay_after_lead_s`, a per-device field already exposed in Phase 11's device dialog (Timers tab) — it doesn't belong in the global Settings dialog.
+
+**Layout:** `SettingsDialog` restructured into a `ttk.Notebook` (General / ADB Timeouts / Health / Debug / Logging) rather than 14 more rows bolted onto the flat ~29-row layout — same pattern Phase 11 used for `ui/device_settings_dialog.py`'s identical "too much content" problem, at the user's explicit direction. The 6 new ADB rows form their own tab (the dialog had no ADB section before this); the 8 new Health rows landed as a new "Device Recovery Timing" section on the existing Health tab, alongside the pre-existing Battery/Temperature threshold rows. `_save()` keeps the same `dataclasses.replace()`-off-`self._original` pattern (Phase 4/6's fix), extended to also replace `adb=` and the new `health=` fields — anything this dialog still doesn't expose keeps passing through unchanged.
+
+Verified with a full-repo compile pass and a functional real-Tkinter test: constructed the dialog, confirmed the Notebook has exactly the 5 expected tabs in order, mutated a value on each new tab plus one on an existing tab, called `_save()`, and asserted both that the mutated values landed on `dlg.result` and that untouched fields (`adb.launch_timeout_s`, `health.battery_resume_percent`, all of `debug`/`logging`) passed through from the original `Settings` object unchanged.
 
 ---
 
