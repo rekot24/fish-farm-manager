@@ -231,11 +231,15 @@ class DeviceWorker:
             self._health_monitor.attempt_adb_reconnect()
             return
 
-        if health.battery_critical:
+        # Health *stats* are already recorded above regardless of these
+        # flags (instruction 11) — only the protective action is
+        # conditional (Phase 11; see HealthResponseConfig's docstring for
+        # why this gate didn't exist before).
+        if health.battery_critical and self.cfg.health_response.battery_protection_enabled:
             self._enter_battery_sleep()
             return
 
-        if health.temp_critical:
+        if health.temp_critical and self.cfg.health_response.temp_protection_enabled:
             self._enter_temp_pause()
             return
 
@@ -249,7 +253,15 @@ class DeviceWorker:
             return
 
         # ---- 4. Run detectors ----
-        detector_names = self.profile.detectors_required
+        # Per-device override (Phase 11): skip detectors this device has
+        # disabled even though the profile normally requires them. A
+        # skipped detector simply has no entry in results — every existing
+        # results.get(name) call site already treats a missing/not-found
+        # detector the same way, so this needs no downstream changes.
+        detector_names = [
+            name for name in self.profile.detectors_required
+            if name not in self.cfg.disabled_detectors
+        ]
         results = run_all_detectors(
             detector_names=detector_names,
             frame_bgr=frame,

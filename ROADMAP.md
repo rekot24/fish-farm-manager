@@ -157,17 +157,25 @@ The standard itself defers this. Worth noting it becomes meaningfully cheaper *a
 
 ---
 
-## Phase 11 — Per-device feature flag UI
+## Phase 11 — Per-device feature flag UI ✅ Done
 
 **Depends on:** Phase 6 (flags must be live in settings store) 
 and Phase 8 (profiles must exist to save/load from UI).
 
-- Add checkbox panel to each device in the UI(within device settings screen)
-- Groups: Detectors / Actions / Health responses / Timers
-- Each checkbox reads from and writes to settings store live — no restart
-- Health stats always visible regardless of checkbox state
-- [Save as Profile...] and [Load Profile...] buttons per device
-- Changing a checkbox takes effect on the next worker loop cycle
+- [x] Add checkbox panel to each device in the UI (within device settings screen)
+- [x] Groups: Detectors / Actions / Health responses / Timers
+- [x] Each checkbox reads from and writes to settings store live — no restart
+- [x] Health stats always visible regardless of checkbox state
+- [x] Save as Preset... / Load Preset... buttons per device
+- [x] Changing a checkbox takes effect on the next worker loop cycle
+
+**Before building UI, traced what each of the four named groups would actually be backed by** — two (Timers, Actions) already existed as live `DeviceConfig` fields from Phase 6/8; two (Detectors, Health responses) didn't exist as toggleable flags at all. Detectors group had no per-device disable mechanism (only the profile's `detectors_required` list, shared across every device on that profile); Health responses turned out to have no enabled flag *at all* — battery-sleep/temp-pause fired unconditionally whenever a threshold was crossed, a real instruction-9 violation that only surfaced from tracing this. Confirmed with the user: add both missing pieces of data model, not just scope down to what already existed. See AUDIT.md for the two new findings this produced.
+
+**New data model:** `DeviceConfig.disabled_detectors: List[str]` (filtered out of `self.profile.detectors_required` each cycle) and a new `HealthResponseConfig` (`battery_protection_enabled`, `temp_protection_enabled`, both default `True` — preserves current always-on behavior for every existing device) on `DeviceConfig.health_response`, gating `_enter_battery_sleep()`/`_enter_temp_pause()`. `BehaviorPreset` (Phase 8) expanded to cover both new fields alongside the original `timers`/`death_behavior` — a preset covering only half a device's behavior would be a confusing half-measure now that there's more of it.
+
+**UI restructured into a `ttk.Notebook`** (General / Timers / Actions / Health / Detectors tabs) rather than more rows on an already-full flat dialog — the same pattern `tools/image_capture_tool.py` already uses for the identical problem. Actions tab's eaten-by rows show/hide live via a Tkinter variable trace on the role checkbox (the requirement captured in CLAUDE.md ahead of this phase); Detectors tab's checklist rebuilds live via a trace on the Profile combo, since required-detector lists differ by profile (public adds `revive_button`). Save as Preset.../Load Preset... live in the persistent bottom button row, not a tab, so they're reachable regardless of which tab is open — both operate on the dialog's in-memory state via a shared `_build_result()`/`_apply_to_widgets()` pair, no need to Save/Cancel first. No delete-preset UI — the data layer supports it, this item only asked for save/load.
+
+Verified with a real-Tkinter test exercising the actual reactivity, not just widget construction: flipped the role checkbox and confirmed the eaten-by rows' pack state changed (caught a test-methodology issue along the way — `winfo_ismapped()` reflects Notebook tab-selection, not pack/pack_forget state; `winfo_manager()` is the correct, tab-independent check), changed the Profile combo and confirmed the detector checklist rebuilt with the right count, and ran a full save-as-preset → modify → load-preset cycle confirming the original values came back through the dialog's own widgets.
 
 ---
 

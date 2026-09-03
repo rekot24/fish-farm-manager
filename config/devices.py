@@ -81,6 +81,26 @@ class DeathBehaviorConfig:
 
 
 @dataclass
+class HealthResponseConfig:
+    """
+    Whether this device's protective health responses actually run.
+
+    Added Phase 11 — before this, battery-sleep and temp-pause fired
+    unconditionally whenever HealthConfig's global thresholds were crossed,
+    with no way to turn either off. That's a standing-instruction-9
+    violation ("no feature runs unconditionally") that surfaced while
+    tracing what Phase 11's "Health responses" checkbox group would
+    actually control. Health *stats* (battery %, temp) stay visible in the
+    UI regardless of these flags (instruction 11) — only the protective
+    *action* becomes skippable. Per-device, not global, since a farm can
+    reasonably want different risk tolerance per device (e.g. one that's
+    always plugged in vs. one that isn't).
+    """
+    battery_protection_enabled: bool = True
+    temp_protection_enabled: bool = True
+
+
+@dataclass
 class DeviceConfig:
     serial: str = ""
     nickname: str = ""
@@ -93,6 +113,12 @@ class DeviceConfig:
     detectors: Dict[str, DetectorConfig] = field(default_factory=dict)
     timers: TimerConfig = field(default_factory=TimerConfig)
     death_behavior: DeathBehaviorConfig = field(default_factory=DeathBehaviorConfig)
+    health_response: HealthResponseConfig = field(default_factory=HealthResponseConfig)
+    # Detector names to skip for this device even though the assigned
+    # profile's detectors_required lists them (Phase 11). A per-device
+    # override, not a profile edit — the profile still defines what's
+    # normally required for that role/server_type.
+    disabled_detectors: List[str] = field(default_factory=list)
     eaten_by_name_image: str = ""
     device_image_overrides: List[str] = field(default_factory=list)
     # Public mode revive counter.
@@ -178,6 +204,16 @@ def load_devices() -> List[DeviceConfig]:
             ),
         )
 
+        # Health response — no migration-default trickery needed (unlike
+        # timers/death_behavior above): both flags default True, which is
+        # exactly the always-on behavior every device already had before
+        # this field existed, for every role/profile.
+        health_response_data = entry.get("health_response", {})
+        health_response = HealthResponseConfig(
+            battery_protection_enabled=health_response_data.get("battery_protection_enabled", True),
+            temp_protection_enabled=health_response_data.get("temp_protection_enabled", True),
+        )
+
         devices.append(DeviceConfig(
             serial=entry.get("serial", ""),
             nickname=entry.get("nickname", ""),
@@ -190,6 +226,8 @@ def load_devices() -> List[DeviceConfig]:
             detectors=detectors,
             timers=timers,
             death_behavior=death_behavior,
+            health_response=health_response,
+            disabled_detectors=entry.get("disabled_detectors", []),
             eaten_by_name_image=entry.get("eaten_by_name_image", ""),
             device_image_overrides=entry.get("device_image_overrides", []),
             revive_count=entry.get("revive_count", 0),
@@ -247,6 +285,11 @@ def save_devices(devices: List[DeviceConfig]) -> None:
                 "eaten_by_detection_enabled": dev.death_behavior.eaten_by_detection_enabled,
                 "eaten_by_detection_trigger_support_end_run": dev.death_behavior.eaten_by_detection_trigger_support_end_run,
             },
+            "health_response": {
+                "battery_protection_enabled": dev.health_response.battery_protection_enabled,
+                "temp_protection_enabled": dev.health_response.temp_protection_enabled,
+            },
+            "disabled_detectors": dev.disabled_detectors,
             "eaten_by_name_image": dev.eaten_by_name_image,
             "device_image_overrides": dev.device_image_overrides,
             "revive_count": dev.revive_count,
