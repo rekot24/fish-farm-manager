@@ -75,8 +75,23 @@ class AdbConfig:
 
 @dataclass
 class DebugConfig:
+    """
+    Live "what is the app doing right now" output (Layer 3) — distinct
+    from LoggingConfig above, which is the persistent on-disk record
+    (Layer 7). Every category here is ADDITIVE: it supplements the
+    always-on INFO/WARNING/ERROR logs from device_worker.py/device_manager.py
+    with extra, opt-in diagnostic detail. It never gates or replaces an
+    existing log line — turning debug off never makes something that's
+    normally visible disappear.
+    """
+    enabled: bool = False              # master switch — off by default in production; nothing below fires while this is False
+    log_state_changes: bool = True     # dump full detector results alongside the existing state-transition log line
+    log_detections: bool = False       # dump every detector's found/score, every scan — verbose
+    log_actions: bool = False          # trace which action-dispatch branch ran for the resolved state
+    log_health: bool = False           # dump raw battery/temp/ADB-check values, every scan
+    log_config_reads: bool = False     # log when settings/device configs are reloaded from the UI
+    screenshot_on_event: bool = False  # also save a death screenshot in private mode (public mode already always does, as a business feature — this extends it to private mode as a debug aid)
     save_failed_captures: bool = True
-    log_state_changes: bool = True
     screenshot_dir: str = "debug_shots"
 
 
@@ -162,8 +177,14 @@ def load_settings() -> Settings:
             reconnect_settle_s=adb_data.get("reconnect_settle_s", ADB_RECONNECT_SETTLE_S),
         ),
         debug=DebugConfig(
-            save_failed_captures=debug_data.get("save_failed_captures", True),
+            enabled=debug_data.get("enabled", False),
             log_state_changes=debug_data.get("log_state_changes", True),
+            log_detections=debug_data.get("log_detections", False),
+            log_actions=debug_data.get("log_actions", False),
+            log_health=debug_data.get("log_health", False),
+            log_config_reads=debug_data.get("log_config_reads", False),
+            screenshot_on_event=debug_data.get("screenshot_on_event", False),
+            save_failed_captures=debug_data.get("save_failed_captures", True),
             screenshot_dir=debug_data.get("screenshot_dir", "debug_shots"),
         ),
         logging=LoggingConfig(
@@ -212,8 +233,14 @@ def save_settings(settings: Settings) -> None:
             "reconnect_settle_s": settings.adb.reconnect_settle_s,
         },
         "debug": {
-            "save_failed_captures": settings.debug.save_failed_captures,
+            "enabled": settings.debug.enabled,
             "log_state_changes": settings.debug.log_state_changes,
+            "log_detections": settings.debug.log_detections,
+            "log_actions": settings.debug.log_actions,
+            "log_health": settings.debug.log_health,
+            "log_config_reads": settings.debug.log_config_reads,
+            "screenshot_on_event": settings.debug.screenshot_on_event,
+            "save_failed_captures": settings.debug.save_failed_captures,
             "screenshot_dir": settings.debug.screenshot_dir,
         },
         "logging": {

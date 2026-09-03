@@ -280,6 +280,7 @@ class DeviceManager:
             worker = self._workers.get(cfg.serial)
             if worker:
                 worker.cfg = cfg
+        self._debug("config_reads", f"Device configs reloaded ({len(new_cfgs)} devices)")
 
     def reload_settings(self, new_settings: Settings) -> None:
         """
@@ -293,6 +294,7 @@ class DeviceManager:
         for worker in self._workers.values():
             worker.settings = new_settings
         app_logger.configure(new_settings.logging, _PROJECT_ROOT)
+        self._debug("config_reads", "Settings reloaded from UI")
 
     # ------------------------------------------------------------------
     # Helpers
@@ -306,3 +308,7 @@ class DeviceManager:
 
     def _log(self, msg: str, level: str = "INFO") -> None:
         self._log_fn(msg, level)
+
+    def _debug(self, category: str, msg: str) -> None:
+        """Layer 3 debug output — see bot/app_logger.debug()'s docstring for the full contract."""
+        app_logger.debug(self.settings.debug, category, msg, self._log)

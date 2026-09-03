@@ -75,6 +75,8 @@ If asked to do something that conflicts with those standards, flag it before pro
 - [2026-09-02] `bot/config_manager.py` deleted outright rather than kept as a re-export shim — no consumers of it exist outside this repo, so a shim would only be a second source of truth to keep in sync for no benefit
 - [2026-09-02] `[TUNABLE]` constants get a live config-dataclass field now (Phase 3) only where the call site already holds a live `Settings`/`HealthMonitor` reference — `HealthConfig` (device_worker.py's settle/poll delays) and the new `AdbConfig` (health_monitor.py, device_manager.py). `bot/actions.py`'s free functions and the three standalone Tkinter tool dialogs (image_capture_tool.py, coordinate_finder.py, add_device_dialog.py) use the same named constants as static defaults instead — they don't currently receive a `Settings` object at all, and threading one through ~15 call sites is a bigger change than this phase's scope. Recorded in AUDIT.md §4 as a deliberate, visible boundary, not a silent gap.
 - [2026-09-02] `_max_unknown_s` (crash-detection timeout) removed as a cached instance attribute — `_check_crash_timeout()` now reads `self.settings.health.crash_detect_after_s` live at the point of use, so a settings change takes effect immediately rather than requiring the worker to restart, consistent with every other live setting in the app
+- [2026-09-02] The debug layer (Layer 3) is strictly additive to the logging layer (Layer 7) — every existing INFO/WARNING/ERROR log from Phase 1 stays exactly as-is, always on. Debug categories (`log_detections`, `log_state_changes`, `log_actions`, `log_health`, `log_config_reads`, `screenshot_on_event`) only ever add supplementary, opt-in detail on top. Chosen over reclassifying the existing lines to be DEBUG-gated, which the standard's own example arguably supports but would mean those lines vanish from default logs the moment `debug.enabled` defaults to `False` — confirmed with user before implementing.
+- [2026-09-02] `SettingsDialog._save()` uses `dataclasses.replace()` off the originally-loaded `Settings`, not fresh `HealthConfig(...)`/`DebugConfig(...)`/`LoggingConfig(...)` construction — found and fixed a real bug where every config field the dialog doesn't expose (all of `AdbConfig`, `HealthConfig`'s Phase 3 settle/poll fields) was silently resetting to its dataclass default on every Save, discarding whatever was actually loaded from disk. Applies as a pattern to any future dialog that edits a subset of a larger config object.
 
 ## Tried and rejected
 - [2026-08-27] Galaxy XCover Pro — GPU (Mali-G72) too weak for Roblox rendering; retired to shelf — do not re-add to active farm
@@ -84,13 +86,14 @@ If asked to do something that conflicts with those standards, flag it before pro
 ## Planned work (see ROADMAP.md for full list)
 - Per-device feature flag UI — checkboxes for every detector, action, and health response per device (ROADMAP Phase 11)
 - Profile system — save/load named sets of feature flags per device (ROADMAP Phase 8)
-- Debug layer master switch + per-category flags (ROADMAP Phase 4)
+- Remove stray `print()` calls in config/settings.py, config/devices.py, config/profiles.py, ui/app.py (ROADMAP Phase 5)
 - Surface `[TUNABLE]` constants in the Settings dialog (ROADMAP Phase 12) — the constants themselves are named and live in `config/constants.py` as of Phase 3; the actual UI rows are still pending, along with settings-store threading for `bot/actions.py` and the standalone tool dialogs (see AUDIT.md §4)
+- `DebugConfig.save_failed_captures` exists and is UI-exposed but is never actually read anywhere — noticed during Phase 4, not fixed (different gap than debug-layer plumbing; belongs with an actual capture-failure-handling feature)
 - CLAUDE.md standing instructions compliance audit — codebase predates these standards
 
 ## Current state
-- Working: ADB connection, screenshot capture, template detection, state machine, basic actions, health monitoring, UI display, persistent logging (rotating `logs/app.log` + always-on `logs/errors.log`, real per-message levels), config loading/saving/validation split into `config/settings.py` / `config/devices.py` / `config/profiles.py` / `config/paths.py`, every magic number named and tagged in `config/constants.py`
-- In progress: Per-device feature flag system, profile save/load; working through ROADMAP.md's standards-compliance phases (Phase 0, 1, 2, 3 done, Phase 4 — debug layer — is next)
+- Working: ADB connection, screenshot capture, template detection, state machine, basic actions, health monitoring, UI display, persistent logging (rotating `logs/app.log` + always-on `logs/errors.log`, real per-message levels), config loading/saving/validation split into `config/settings.py` / `config/devices.py` / `config/profiles.py` / `config/paths.py`, every magic number named and tagged in `config/constants.py`, debug layer (master switch + 6 categories, additive to normal logging, all exposed in the Settings dialog)
+- In progress: Per-device feature flag system, profile save/load; working through ROADMAP.md's standards-compliance phases (Phase 0, 1, 2, 3, 4 done, Phase 5 — remove stray prints — is next)
 - Known broken: Detection loop reliability — multiple behaviors running simultaneously without individual toggles makes isolation and debugging difficult
 
 ## Session log
@@ -129,6 +132,17 @@ If asked to do something that conflicts with those standards, flag it before pro
 - Found and fixed four more unnamed literals in `capture/scrcpy_socket.py` beyond what the original audit called out, while already in that file for the two retry sleeps.
 - Verified with a full-repo compile pass, a functional smoke test (Settings defaults, detector.py/Settings sharing the same confidence-default object via `inspect.signature`, save/load round-trip with the new fields, HealthMonitor's live `adb_cfg` wiring), and a `DeviceWorker` end-to-end construction test confirming `_max_unknown_s` is gone and `_health_monitor.adb_cfg is settings.adb`.
 - Modified: bot/device_worker.py, bot/device_manager.py, bot/actions.py, bot/health_monitor.py, config/settings.py, detection/detector.py, capture/adb_screencap.py, capture/scrcpy_socket.py, ui/app.py, ui/add_device_dialog.py, tools/coordinate_finder.py, tools/image_capture_tool.py, README.md, AUDIT.md, ROADMAP.md, CLAUDE.md. Added: config/constants.py.
+
+### 2026-09-02 — Phase 4 (ROADMAP.md)
+- Expanded `DebugConfig` with the master `enabled` switch (default `False`) and five new categories (`log_detections`, `log_actions`, `log_health`, `log_config_reads`, `screenshot_on_event`), alongside the pre-existing `log_state_changes`.
+- Resolved a real tension in the standard before implementing (Layer 7's "state changed" as always-on INFO vs. Layer 3's `log_state_changes` as a gated debug category) by confirming with the user: additive, not overlapping. See key decisions.
+- Central `debug()` function added to `bot/app_logger.py`; thin `_debug(category, msg)` wrappers added to `DeviceWorker` and `DeviceManager`, delegating through their existing `_log()`.
+- Wired six call sites: `log_detections`/`log_state_changes` after detector runs (`_format_results()` helper added), `log_health` after every health check, `log_actions` at the top of `_dispatch()`, `log_config_reads` in `DeviceManager.reload_settings()`/`reload_device_configs()`, `screenshot_on_event` extending death-screenshot capture to private mode (previously public-mode-only, as a business feature).
+- All new `DebugConfig` fields exposed as checkboxes in the Settings dialog (flat, grouped under the existing "Debug" section — not a true collapse/expand widget).
+- Found and fixed a real bug while wiring the new checkboxes: `SettingsDialog._save()` was constructing fresh config objects from only its exposed fields, silently resetting every Phase-3-added field the dialog doesn't have a row for. Fixed with `dataclasses.replace()` — see key decisions.
+- Noticed but didn't fix: `DebugConfig.save_failed_captures` is UI-exposed but never actually read by any code path — different gap than this phase's scope, added to Planned work.
+- Verified with a full-repo compile pass, a functional smoke test (`app_logger.debug()` gating logic, `DeviceWorker`/`DeviceManager` `_debug()` end-to-end, `_format_results()`), and a real-Tkinter `SettingsDialog` test confirming the `dataclasses.replace()` fix actually preserves dialog-unexposed field values through a save.
+- Modified: config/settings.py, bot/app_logger.py, bot/device_worker.py, bot/device_manager.py, ui/settings_dialog.py, AUDIT.md, ROADMAP.md, CLAUDE.md.
 
 ---
 

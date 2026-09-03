@@ -38,6 +38,7 @@ from bot.state_machine import resolve_state
 from bot.farm_event_bus import FarmEventBus, EVENT_CASCADE_RESET, EVENT_FORCE_END_RUN, EVENT_MOVE_TO_PRIVATE
 from bot.health_monitor import HealthMonitor, HealthStatus
 from bot import actions
+from bot import app_logger
 from capture import make_backend
 from capture.base import CaptureBackend
 from detection.detector import run_all_detectors, find_by_path
@@ -207,6 +208,11 @@ class DeviceWorker:
         health = self._health_monitor.check()
         with self._health_lock:
             self.health = health
+        self._debug(
+            "health",
+            f"battery={health.battery_percent}% temp={health.temperature_celsius:.1f}°C "
+            f"adb_connected={health.adb_connected}",
+        )
 
         if not health.adb_connected:
             self._set_state(STATE_ADB_LOST)
@@ -241,6 +247,7 @@ class DeviceWorker:
             bank=self.bank,
             threshold=self.settings.template_confidence_default,
         )
+        self._debug("detections", self._format_results(results))
 
         # ---- 5. Resolve state ----
         state = resolve_state(results, self.profile.profile_name)
@@ -249,6 +256,7 @@ class DeviceWorker:
         # Log only on state transitions
         if self.settings.debug.log_state_changes and state != self._prev_state:
             self._log(f"[{self._name()}] state: {self._prev_state} → {state}")
+            self._debug("state_changes", f"detector results at transition: {self._format_results(results)}")
         self._prev_state = state
 
         # ---- 6. Dispatch actions ----
@@ -260,6 +268,7 @@ class DeviceWorker:
 
     def _dispatch(self, state: str, results: dict, frame) -> None:
         """Route actions based on current state."""
+        self._debug("actions", f"dispatching for state={state}")
 
         if state == STATE_IN_RUN:
             self._check_auto_farm_reset(results)
@@ -402,6 +411,12 @@ class DeviceWorker:
     def _handle_dead_private(self, results: dict, frame) -> None:
         """Dead state handling for private mode."""
         behaviors = self.profile.behaviors
+
+        # Debug aid: private mode never screenshots on death otherwise
+        # (unlike public mode, where it's an always-on business feature —
+        # see _handle_dead_public's dead_cfg.save_screenshot). Opt-in only.
+        if self.settings.debug.enabled and self.settings.debug.screenshot_on_event:
+            self._save_death_screenshot(frame)
 
         # Lead only: eaten-by detection
         if self.cfg.is_lead:
@@ -667,6 +682,22 @@ class DeviceWorker:
         """Short display name for log lines."""
         return self.cfg.nickname or self.cfg.serial[:8]
 
+    def _format_results(self, results: dict) -> str:
+        """Compact found/score summary of a detector-results dict, for debug output."""
+        parts = []
+        for name, result in results.items():
+            score = f"{result.score:.3f}" if result.score is not None else "-"
+            parts.append(f"{name}={result.found}/{score}")
+        return ", ".join(parts)
+
     def _log(self, msg: str, level: str = "INFO") -> None:
         """Send a log message through the log function (UI queue or print)."""
         self._log_fn(msg, level)
+
+    def _debug(self, category: str, msg: str) -> None:
+        """
+        Layer 3 debug output — additive diagnostic detail, opt-in via
+        settings.debug.enabled + settings.debug.log_<category>. See
+        bot/app_logger.debug()'s docstring for the full contract.
+        """
+        app_logger.debug(self.settings.debug, category, msg, self._log)

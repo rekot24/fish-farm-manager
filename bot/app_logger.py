@@ -22,11 +22,18 @@ One function handles all output:
   callback-registration layer for the UI would be indirection with nothing
   behind it.
 
+Also home to debug() — the Layer 3 debug function (see its own docstring
+below). Distinct concern from log() above: log() is the persistent record;
+debug() is opt-in, additive diagnostic detail gated by DebugConfig, routed
+through the caller's own log_fn so it still reaches every normal
+destination once enabled.
+
 Usage:
     configure(settings.logging, project_root)   # once, at startup, and again
                                                  # on every settings reload —
                                                  # changes take effect immediately
     log("worker started", level="INFO")         # from anywhere in the app
+    debug(settings.debug, "detections", "...", self._log)  # opt-in detail
 """
 
 from __future__ import annotations
@@ -34,8 +41,9 @@ from __future__ import annotations
 import logging
 import logging.handlers
 from pathlib import Path
+from typing import Callable
 
-from config.settings import LoggingConfig
+from config.settings import LoggingConfig, DebugConfig
 
 
 # Module-level singleton logger — one process, one log stream.
@@ -110,6 +118,34 @@ def log(msg: str, level: str = "INFO") -> None:
         # very early startup) — fall back to console so nothing is silently
         # lost rather than raising or dropping it.
         print(f"[{level}] {msg}")
+
+
+def debug(cfg: DebugConfig, category: str, msg: str, log_fn: Callable[[str, str], None]) -> None:
+    """
+    The central Layer 3 debug function (dev-standards app-framework.md).
+
+    Emits msg at DEBUG level through log_fn — the caller's own _log()/log(),
+    so debug output reaches the same file/console/UI destinations as
+    everything else — but only if both gates pass:
+      1. cfg.enabled (the master switch)
+      2. cfg.log_<category> (the per-category flag)
+
+    This is always ADDITIVE: it supplements the always-on INFO/WARNING/
+    ERROR logs elsewhere in the app with extra, opt-in diagnostic detail.
+    It never gates or replaces an existing log line — see DebugConfig's
+    docstring in config/settings.py.
+
+    Args:
+        cfg      : settings.debug (a DebugConfig)
+        category : e.g. "detections" — checked against cfg.log_detections
+        msg      : the debug message
+        log_fn   : the caller's own log(msg, level) — e.g. DeviceWorker._log
+    """
+    if not cfg.enabled:
+        return
+    if not getattr(cfg, f"log_{category}", False):
+        return
+    log_fn(f"[DEBUG:{category}] {msg}", "DEBUG")
 
 
 def _level_from_name(level: str) -> int:

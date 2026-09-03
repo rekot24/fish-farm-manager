@@ -61,13 +61,19 @@ This phase touched nearly every file, as expected — confirmed with a full-repo
 
 ---
 
-## Phase 4 — Debug layer (Layer 3)
+## Phase 4 — Debug layer (Layer 3) ✅ Done
 
 **Depends on:** Phase 1 (needs somewhere to route debug output) and Phase 2 (adding the new config fields cleanly).
 
-- Add the master `debug.enabled` switch and per-category flags (`log_detections`, `log_actions`, `log_health`, `log_config_reads`, `screenshot_on_event`) to `DebugConfig`.
-- Add the central `_debug(category, msg)` function described in the standard, checking both the master switch and the category flag before calling into the Phase 1 logger.
-- Wire the UI debug section to show the master toggle collapsed by default with per-category checkboxes underneath, per the standard's UI convention.
+- [x] Add the master `debug.enabled` switch and per-category flags (`log_detections`, `log_actions`, `log_health`, `log_config_reads`, `screenshot_on_event`) to `DebugConfig`.
+- [x] Add the central `_debug(category, msg)` function described in the standard, checking both the master switch and the category flag before calling into the Phase 1 logger.
+- [x] Wire the UI debug section with checkboxes for every category.
+
+Landed as `app_logger.debug(cfg, category, msg, log_fn)` in `bot/app_logger.py`, with a thin `_debug(category, msg)` wrapper on `DeviceWorker` and `DeviceManager` delegating to it through their existing `_log()` — so debug output reaches the same file/console/UI destinations as everything else. Resolved a real tension in the standard before implementing: Layer 7 lists "state changed" as an always-on INFO example, while Layer 3 lists `log_state_changes` as a debug category with its own toggle. Decision (confirmed with the user): additive, not overlapping — every Phase 1 INFO/WARNING/ERROR log stays exactly as-is, always on; the new debug categories add supplementary, opt-in detail on top (detector scores every scan for `log_detections`, raw health values every scan for `log_health`, the results dict at a transition for `log_state_changes`, dispatch tracing for `log_actions`, reload tracing for `log_config_reads`). Turning debug off never makes an existing log line disappear.
+
+Skipped the standard's "collapsed by default" UI treatment — flat grouped checkboxes in the existing Debug section, matching the dialog's current style, rather than adding new expand/collapse widget behavior for a cosmetic nicety.
+
+Bonus fix, found while wiring the new checkboxes: `SettingsDialog._save()` was constructing fresh `HealthConfig`/`DebugConfig`/`LoggingConfig` objects from only its exposed fields, silently resetting every Phase 3 field the dialog doesn't have a row for (all of `AdbConfig`, `HealthConfig`'s settle/poll delays) to its default on every save. Fixed with `dataclasses.replace()` off the originally-loaded `Settings` — see AUDIT.md §2.
 
 ---
 
