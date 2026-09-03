@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List
 
 from config.paths import devices_path
+from bot import app_logger
 
 
 # ---------------------------------------------------------------------------
@@ -85,7 +86,7 @@ def load_devices() -> List[DeviceConfig]:
         data = json.load(f)
 
     if not isinstance(data, list):
-        print(f"[config] devices.json is not a list, returning empty")
+        app_logger.log("[config] devices.json is not a list, returning empty", "ERROR")
         return []
 
     devices = []

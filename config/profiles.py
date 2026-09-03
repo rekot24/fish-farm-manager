@@ -18,6 +18,7 @@ from typing import Any, Dict, List
 import yaml
 
 from config.paths import profiles_dir
+from bot import app_logger
 
 
 # ---------------------------------------------------------------------------
@@ -69,5 +70,5 @@ def load_all_profiles() -> Dict[str, ProfileConfig]:
         try:
             profiles[name] = load_profile(name)
         except Exception as e:
-            print(f"[config] Failed to load profile '{name}': {e}")
+            app_logger.log(f"[config] Failed to load profile '{name}': {e}", "ERROR")
     return profiles

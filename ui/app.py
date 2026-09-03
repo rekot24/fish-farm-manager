@@ -186,7 +186,6 @@ class App:
         capped = min(device_count, self.MAX_VISIBLE_DEVICES_FOR_RESIZE)
         panel_height = capped * self.DEVICE_PANEL_HEIGHT_PX
         total = panel_height + self.LOG_PANEL_HEIGHT_PX + self.TOP_BAR_HEIGHT_PX
-        print(f"[resize] devices={device_count} total_height={total}")
         self.root.geometry(f"820x{total}")
 
     # ------------------------------------------------------------------

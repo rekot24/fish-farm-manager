@@ -30,7 +30,11 @@ def main():
         settings = load_settings()
         devices = load_devices()
     except Exception as e:
-        print(f"[FATAL] Failed to load configuration: {e}")
+        # app_logger isn't configured yet at this point (that needs
+        # settings.logging, which is what just failed to load) — its own
+        # log() falls back to a console print in that case, so this still
+        # goes through the one call site rather than a bespoke print.
+        app_logger.log(f"[FATAL] Failed to load configuration: {e}", "CRITICAL")
         sys.exit(1)
 
     # ---- Start the persistent logger before anything else logs ----

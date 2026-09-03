@@ -77,12 +77,16 @@ Bonus fix, found while wiring the new checkboxes: `SettingsDialog._save()` was c
 
 ---
 
-## Phase 5 — Remove stray `print()` calls
+## Phase 5 — Remove stray `print()` calls ✅ Done
 
 **Depends on:** Phases 1 and 4 (there needs to be a real destination for these before deleting the `print()`s).
 
-- [config/settings.py:82](config/settings.py#L82), [config/devices.py:88](config/devices.py#L88), [config/profiles.py:72](config/profiles.py#L72) (relocated from `bot/config_manager.py` by Phase 2, unchanged otherwise) — these are free functions with no logger access today; give them a lightweight module-level logger or accept a `log_fn` parameter.
-- [ui/app.py:178](ui/app.py#L178) — the leftover resize-debug print becomes a `self._debug("ui", ...)` call or is deleted if it was scaffolding.
+- [x] `config/settings.py`, `config/devices.py`, `config/profiles.py` (relocated from `bot/config_manager.py` by Phase 2) — call `app_logger.log()` directly; they're free functions with no natural instance to route through.
+- [x] `ui/app.py`'s resize-debug print — deleted outright (scaffolding, per the option this item already offered), rather than given a new debug category for one low-value line.
+- [x] **Scope grew on a fresh grep:** 20 more `print()` calls in `capture/scrcpy_socket.py` (18) and `capture/adb_screencap.py` (2) that were never in this item's original list, plus one in `main.py`'s config-load-failure path — same fix, same reasoning (a capture-backend failure overnight was going to a print() nobody would see). These reach the file/console logger, not the UI panel — threading a `log_fn` through `make_backend()` for that is out of this phase's scope, same kind of boundary as Phase 3's `bot/actions.py` call; `DeviceWorker` already surfaces the user-facing symptom (frame capture returning `None`) to the UI regardless.
+- [x] **Unplanned prerequisite:** routing `config/settings.py` through `app_logger` created a circular import (`app_logger.py` already imports `LoggingConfig`/`DebugConfig` from `config.settings`). Fixed by moving those two imports behind `TYPE_CHECKING` in `app_logger.py` — they're never constructed or isinstance-checked there, only attribute-read, so this costs nothing at runtime.
+
+Verified with a full-repo compile pass and a functional test confirming both import directions (starting from `config.settings` fresh, the harder circularity case) and that the missing-`settings.json` WARNING path actually fires through the print fallback.
 
 ---
 

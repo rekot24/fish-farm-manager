@@ -25,6 +25,7 @@ from config.constants import (
     ADB_SCREENCAP_TIMEOUT_S, ADB_SCREENCAP_BATCH_TIMEOUT_S,
     ADB_RECONNECT_SETTLE_S,
 )
+from bot import app_logger
 
 
 # ---------------------------------------------------------------------------
@@ -136,7 +137,7 @@ def load_settings() -> Settings:
     """
     path = settings_path()
     if not path.exists():
-        print(f"[config] settings.json not found at {path}, using defaults")
+        app_logger.log(f"[config] settings.json not found at {path}, using defaults", "WARNING")
         return Settings()
 
     with open(path, "r", encoding="utf-8") as f:

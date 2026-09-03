@@ -41,9 +41,15 @@ from __future__ import annotations
 import logging
 import logging.handlers
 from pathlib import Path
-from typing import Callable
+from typing import Callable, TYPE_CHECKING
 
-from config.settings import LoggingConfig, DebugConfig
+if TYPE_CHECKING:
+    # Type-only: config/settings.py itself needs to call log()/debug() (Phase
+    # 5, routing its own print()s through here), which would make a runtime
+    # import of LoggingConfig/DebugConfig from here a circular import.
+    # Neither is ever constructed or isinstance-checked below — only their
+    # attributes are read — so this costs nothing at runtime.
+    from config.settings import LoggingConfig, DebugConfig
 
 
 # Module-level singleton logger — one process, one log stream.

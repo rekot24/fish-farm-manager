@@ -45,6 +45,7 @@ import numpy as np
 import cv2
 
 from capture.base import CaptureBackend
+from bot import app_logger
 from config.constants import (
     ADB_DEFAULT_TIMEOUT_S, SCRCPY_PORT_RANGE_SIZE, SCRCPY_SERVER_BIND_SETTLE_S,
     SCRCPY_DECODE_THREAD_JOIN_TIMEOUT_S, SCRCPY_TEARDOWN_TIMEOUT_S,
@@ -127,8 +128,8 @@ class ScrcpySocketBackend(CaptureBackend):
         """
         try:
             if not self._jar_path.exists():
-                print(f"[scrcpy] Server jar not found: {self._jar_path}")
-                print(f"[scrcpy] Download scrcpy-server.jar and place it at: {self._jar_path}")
+                app_logger.log(f"[scrcpy] Server jar not found: {self._jar_path}", "ERROR")
+                app_logger.log(f"[scrcpy] Download scrcpy-server.jar and place it at: {self._jar_path}", "ERROR")
                 return False
 
             self._stop_event.clear()
@@ -158,7 +159,7 @@ class ScrcpySocketBackend(CaptureBackend):
 
             # 7. Initialize PyAV H.264 decoder
             if not _AV_AVAILABLE:
-                print(f"[scrcpy] PyAV not installed. Run: pip install av")
+                app_logger.log("[scrcpy] PyAV not installed. Run: pip install av", "ERROR")
                 return False
             self._decoder = _av_module.CodecContext.create("h264", "r")
 
@@ -171,11 +172,11 @@ class ScrcpySocketBackend(CaptureBackend):
             self._decode_thread.start()
 
             self._connected = True
-            print(f"[scrcpy] Connected to {self.serial} on port {self.local_port}")
+            app_logger.log(f"[scrcpy] Connected to {self.serial} on port {self.local_port}", "INFO")
             return True
 
         except Exception as e:
-            print(f"[scrcpy] connect() failed for {self.serial}: {type(e).__name__}: {e}")
+            app_logger.log(f"[scrcpy] connect() failed for {self.serial}: {type(e).__name__}: {e}", "ERROR")
             self.disconnect()
             return False
 
@@ -246,11 +247,11 @@ class ScrcpySocketBackend(CaptureBackend):
         try:
             result = self._adb("push", str(self._jar_path), self._DEVICE_SERVER_PATH)
             if result.returncode != 0:
-                print(f"[scrcpy] Failed to push server jar to {self.serial}")
+                app_logger.log(f"[scrcpy] Failed to push server jar to {self.serial}", "ERROR")
                 return False
             return True
         except Exception as e:
-            print(f"[scrcpy] push_server error: {e}")
+            app_logger.log(f"[scrcpy] push_server error: {e}", "ERROR")
             return False
 
     def _setup_port_forward(self) -> bool:
@@ -260,11 +261,11 @@ class ScrcpySocketBackend(CaptureBackend):
                 "forward", f"tcp:{self.local_port}", "localabstract:scrcpy"
             )
             if result.returncode != 0:
-                print(f"[scrcpy] Port forward failed for {self.serial}")
+                app_logger.log(f"[scrcpy] Port forward failed for {self.serial}", "ERROR")
                 return False
             return True
         except Exception as e:
-            print(f"[scrcpy] port_forward error: {e}")
+            app_logger.log(f"[scrcpy] port_forward error: {e}", "ERROR")
             return False
 
     def _start_server(self) -> bool:
@@ -293,7 +294,7 @@ class ScrcpySocketBackend(CaptureBackend):
             )
             return True
         except Exception as e:
-            print(f"[scrcpy] start_server error: {e}")
+            app_logger.log(f"[scrcpy] start_server error: {e}", "ERROR")
             return False
 
     def _connect_socket(self) -> bool:
@@ -309,7 +310,7 @@ class ScrcpySocketBackend(CaptureBackend):
                 return True
             except (ConnectionRefusedError, OSError):
                 time.sleep(SCRCPY_SOCKET_RETRY_SLEEP_S)  # server not ready yet, retry
-        print(f"[scrcpy] Socket connection timed out for {self.serial}")
+        app_logger.log(f"[scrcpy] Socket connection timed out for {self.serial}", "ERROR")
         return False
 
     def _read_headers(self) -> bool:
@@ -324,24 +325,24 @@ class ScrcpySocketBackend(CaptureBackend):
             # Read and discard device name header
             device_header = self._recv_exact(self._HEADER_SIZE)
             if not device_header:
-                print(f"[scrcpy] Failed to read device header from {self.serial}")
+                app_logger.log(f"[scrcpy] Failed to read device header from {self.serial}", "ERROR")
                 return False
 
             device_name = device_header.rstrip(b"\x00").decode("utf-8", errors="replace")
-            print(f"[scrcpy] Device: {device_name}")
+            app_logger.log(f"[scrcpy] Device: {device_name}", "INFO")
 
             # Read video stream header
             video_header = self._recv_exact(self._VIDEO_HEADER_SIZE)
             if not video_header:
-                print(f"[scrcpy] Failed to read video header from {self.serial}")
+                app_logger.log(f"[scrcpy] Failed to read video header from {self.serial}", "ERROR")
                 return False
 
             codec_id, width, height = struct.unpack(">III", video_header)
-            print(f"[scrcpy] Stream: codec={codec_id:#010x} size={width}x{height}")
+            app_logger.log(f"[scrcpy] Stream: codec={codec_id:#010x} size={width}x{height}", "INFO")
             return True
 
         except Exception as e:
-            print(f"[scrcpy] read_headers error: {e}")
+            app_logger.log(f"[scrcpy] read_headers error: {e}", "ERROR")
             return False
 
     def _recv_exact(self, n: int) -> bytes | None:
@@ -406,7 +407,7 @@ class ScrcpySocketBackend(CaptureBackend):
                 continue  # no data yet, loop again
             except Exception as e:
                 if not self._stop_event.is_set():
-                    print(f"[scrcpy] decode_loop error for {self.serial}: {e}")
+                    app_logger.log(f"[scrcpy] decode_loop error for {self.serial}: {e}", "ERROR")
                 break
 
-        print(f"[scrcpy] Decode loop ended for {self.serial}")
+        app_logger.log(f"[scrcpy] Decode loop ended for {self.serial}", "INFO")

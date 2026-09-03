@@ -23,6 +23,7 @@ import cv2
 
 from capture.base import CaptureBackend
 from config.constants import ADB_QUICK_TIMEOUT_S, ADB_SCREENCAP_TIMEOUT_S
+from bot import app_logger
 
 
 class ADBScreencapBackend(CaptureBackend):
@@ -60,7 +61,7 @@ class ADBScreencapBackend(CaptureBackend):
                 return True
             return False
         except Exception as e:
-            print(f"[adb_screencap] connect failed for {self.serial}: {e}")
+            app_logger.log(f"[adb_screencap] connect failed for {self.serial}: {e}", "ERROR")
             return False
 
     def get_frame(self) -> np.ndarray | None:
@@ -83,10 +84,10 @@ class ADBScreencapBackend(CaptureBackend):
             return frame  # BGR, or None if decode failed
 
         except subprocess.TimeoutExpired:
-            print(f"[adb_screencap] screencap timed out for {self.serial}")
+            app_logger.log(f"[adb_screencap] screencap timed out for {self.serial}", "WARNING")
             return None
         except Exception as e:
-            print(f"[adb_screencap] get_frame error for {self.serial}: {e}")
+            app_logger.log(f"[adb_screencap] get_frame error for {self.serial}: {e}", "ERROR")
             return None
 
     def disconnect(self) -> None:
