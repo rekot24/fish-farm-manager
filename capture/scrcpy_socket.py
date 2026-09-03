@@ -88,12 +88,18 @@ class ScrcpySocketBackend(CaptureBackend):
         max_size: int = 0,         # 0 = native resolution; set e.g. 720 to limit height
         bit_rate: int = 2_000_000, # 2 Mbps — low enough for USB, high enough for detection
         connect_timeout_s: float = 10.0,
+        development_mode: bool = False,
     ):
         super().__init__(serial)
         self.adb_path = adb_path
         self.max_size = max_size
         self.bit_rate = bit_rate
         self.connect_timeout_s = connect_timeout_s
+        # Layer 6 two-mode error handling, mirrors DeviceWorker._run() — see
+        # _decode_loop() below. This backend runs its own background thread,
+        # so it needs the same outermost-safety-net treatment DeviceWorker's
+        # main loop got.
+        self.development_mode = development_mode
         self.local_port = _port_for_serial(serial)
 
         # Resolve server jar path
@@ -406,8 +412,16 @@ class ScrcpySocketBackend(CaptureBackend):
             except (socket.timeout, TimeoutError):
                 continue  # no data yet, loop again
             except Exception as e:
+                # Layer 6 two-mode error handling, same pattern as
+                # DeviceWorker._run(): always log, re-raise only in
+                # development mode. In production this is unchanged — log
+                # and end this thread; the device's frame capture stops,
+                # which DeviceWorker already surfaces via its own
+                # "Frame capture returned None" warning path.
                 if not self._stop_event.is_set():
                     app_logger.log(f"[scrcpy] decode_loop error for {self.serial}: {e}", "ERROR")
+                if self.development_mode and not self._stop_event.is_set():
+                    raise
                 break
 
         app_logger.log(f"[scrcpy] Decode loop ended for {self.serial}", "INFO")

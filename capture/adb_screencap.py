@@ -33,16 +33,28 @@ class ADBScreencapBackend(CaptureBackend):
     Use as fallback when scrcpy socket is not available.
     """
 
-    def __init__(self, serial: str, adb_path: str = "adb", timeout_s: float = ADB_SCREENCAP_TIMEOUT_S):
+    def __init__(
+        self,
+        serial: str,
+        adb_path: str = "adb",
+        timeout_s: float = ADB_SCREENCAP_TIMEOUT_S,
+        development_mode: bool = False,
+    ):
         """
         Args:
-            serial    : ADB device serial
-            adb_path  : path to the adb executable (default "adb" = on PATH)
-            timeout_s : max seconds to wait for screencap command
+            serial          : ADB device serial
+            adb_path        : path to the adb executable (default "adb" = on PATH)
+            timeout_s       : max seconds to wait for screencap command
+            development_mode: accepted for interface parity with
+                               ScrcpySocketBackend (make_backend() passes it
+                               to whichever backend gets selected) — unused
+                               here since this backend has no background
+                               thread of its own to crash loudly in.
         """
         super().__init__(serial)
         self.adb_path = adb_path
         self.timeout_s = timeout_s
+        self.development_mode = development_mode
 
     def connect(self) -> bool:
         """

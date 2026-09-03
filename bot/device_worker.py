@@ -177,6 +177,7 @@ class DeviceWorker:
             serial=self.cfg.serial,
             backend_type=self.cfg.capture_backend,
             adb_path=self.settings.adb_path,
+            development_mode=self.settings.development_mode,
         )
         if not self._backend.connect():
             self._log(f"[{self._name()}] Capture backend failed to connect. Worker exiting.", "ERROR")
@@ -188,7 +189,16 @@ class DeviceWorker:
             try:
                 self._loop_iteration()
             except Exception as e:
+                # Layer 6 two-mode error handling: always log (a record must
+                # exist regardless of mode), then re-raise only in
+                # development mode so the traceback surfaces immediately
+                # instead of being visible only as this one log line. In
+                # production this is unchanged — swallow and keep looping,
+                # since the farm must survive an unexpected error in one
+                # iteration rather than stop running unattended.
                 self._log(f"[{self._name()}] Unhandled error in loop: {type(e).__name__}: {e}", "ERROR")
+                if self.settings.development_mode:
+                    raise
 
             elapsed = time.time() - t0
             target_s = self.cfg.scan_interval_ms / 1000.0

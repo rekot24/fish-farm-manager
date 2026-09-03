@@ -108,12 +108,20 @@ Verified with a full-repo compile pass, assertions that every real device's migr
 
 ---
 
-## Phase 7 — Dev vs. production error-handling mode
+## Phase 7 — Dev vs. production error-handling mode ✅ Done
 
 **Depends on:** Phases 1 and 4 (the switch needs a logging layer and follows the same settings-driven-toggle pattern the debug layer just established).
 
-- Add the mode switch (dev = fail loudly / raise; prod = fail gracefully / log + fallback) to `Settings`.
-- Update `DeviceWorker._run()`'s top-level catch ([bot/device_worker.py:161-164](bot/device_worker.py#L161-L164)) to branch on it — currently it always swallows and logs, even truly unexpected exceptions, which is fine for unattended production runs but makes bugs invisible while developing.
+- [x] Add the mode switch (dev = fail loudly / raise; prod = fail gracefully / log + fallback) to `Settings` — `development_mode: bool`, default `False`.
+- [x] Update `DeviceWorker._run()`'s top-level catch to branch on it — always logs (unchanged), re-raises only in development mode.
+
+Scope discipline decided up front and stuck to: this does *not* retrofit every `except Exception` in the codebase. Layer 6's own example distinguishes named/expected failures (always handled gracefully, every mode) from the genuinely-unexpected bucket at the outermost boundary (mode-dependent) — most of the broad catches elsewhere (`bot/actions.py`, the capture backends' inner methods, `detection/detector.py`) are the first kind and were correctly left untouched.
+
+One analogous site found and included by design, not accident: `capture/scrcpy_socket.py`'s `_decode_loop()` runs its own background thread with its own outermost catch-all (previously: log and `break`, silently ending that device's frame decoding on any unexpected error) — same category as `DeviceWorker._run()`'s loop, so it got the same treatment. Required threading `development_mode` through `make_backend()` into both `ScrcpySocketBackend` and `ADBScreencapBackend` (the latter accepts-but-doesn't-use it, for interface parity — it has no background thread of its own to crash loudly in).
+
+UI: one checkbox added to the Settings dialog's General section, though ROADMAP didn't explicitly ask for it — unlike Phase 3/6's tunables, nothing later promises a dedicated UI phase for this one flag, so leaving it hand-edit-only in `settings.json` would have been permanent, not deferred.
+
+Verified by actually triggering exceptions at runtime, not just asserting config values: a background-thread test forcing `DeviceWorker._loop_iteration()` to raise repeatedly confirmed production mode logs every error and keeps the worker thread alive (5 iterations survived), while development mode logs once and lets the thread die with a full traceback (visible in the test output) after exactly 1 call. Same live test against `_decode_loop()` confirmed the same two behaviors there.
 
 ---
 
@@ -142,7 +150,7 @@ The standard itself defers this. Worth noting it becomes meaningfully cheaper *a
 **Depends on:** Phase 6 (flags must be live in settings store) 
 and Phase 8 (profiles must exist to save/load from UI).
 
-- Add checkbox panel to each device in the UI
+- Add checkbox panel to each device in the UI(within device settings screen)
 - Groups: Detectors / Actions / Health responses / Timers
 - Each checkbox reads from and writes to settings store live — no restart
 - Health stats always visible regardless of checkbox state

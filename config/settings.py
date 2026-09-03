@@ -120,6 +120,12 @@ class Settings:
     template_confidence_default: float = DEFAULT_TEMPLATE_CONFIDENCE
     private_server_link: str = ""
     capture_backend_default: str = "scrcpy"   # "scrcpy" or "adb"
+    # Layer 6 two-mode error handling (CLAUDE.md instruction 8): False (the
+    # production-safe default) means an unexpected error in a worker's main
+    # loop is logged and the loop keeps running. True means it's logged AND
+    # re-raised, so the traceback surfaces immediately during development
+    # instead of being visible only as a one-line log entry.
+    development_mode: bool = False
     health: HealthConfig = field(default_factory=HealthConfig)
     adb: AdbConfig = field(default_factory=AdbConfig)
     debug: DebugConfig = field(default_factory=DebugConfig)
@@ -154,6 +160,7 @@ def load_settings() -> Settings:
         template_confidence_default=data.get("template_confidence_default", DEFAULT_TEMPLATE_CONFIDENCE),
         private_server_link=data.get("private_server_link", ""),
         capture_backend_default=data.get("capture_backend_default", "scrcpy"),
+        development_mode=data.get("development_mode", False),
         health=HealthConfig(
             battery_min_percent=health_data.get("battery_min_percent", 20),
             battery_resume_percent=health_data.get("battery_resume_percent", 80),
@@ -210,6 +217,7 @@ def save_settings(settings: Settings) -> None:
         "template_confidence_default": settings.template_confidence_default,
         "private_server_link": settings.private_server_link,
         "capture_backend_default": settings.capture_backend_default,
+        "development_mode": settings.development_mode,
         "health": {
             "battery_min_percent": settings.health.battery_min_percent,
             "battery_resume_percent": settings.health.battery_resume_percent,

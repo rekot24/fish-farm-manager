@@ -39,6 +39,7 @@ class SettingsDialog:
         self._confidence = tk.DoubleVar(value=settings.template_confidence_default)
         self._backend = tk.StringVar(value=settings.capture_backend_default)
         self._scan_ms = tk.IntVar(value=settings.scan_interval_ms)
+        self._development_mode = tk.BooleanVar(value=settings.development_mode)
 
         h = settings.health
         self._bat_min = tk.IntVar(value=h.battery_min_percent)
@@ -94,6 +95,12 @@ class SettingsDialog:
         row("Template Confidence:", lambda f, **kw: ttk.Spinbox(
             f, from_=0.50, to=1.00, increment=0.01, textvariable=self._confidence,
             format="%.2f", width=8))
+        row("Development Mode:", lambda f, **kw: ttk.Checkbutton(
+            f, variable=self._development_mode))
+        ttk.Label(outer,
+                  text="An unexpected error in a device's loop crashes that worker with a full\n"
+                       "traceback instead of just logging it and continuing. Leave off for farm use.",
+                  foreground="#888888", justify="left").pack(anchor="w", pady=(0, 4))
 
         # ---- Private Server ----
         section("Private Server")
@@ -191,6 +198,7 @@ class SettingsDialog:
             scan_interval_ms=self._scan_ms.get(),
             template_confidence_default=self._confidence.get(),
             capture_backend_default=self._backend.get(),
+            development_mode=self._development_mode.get(),
             health=dataclasses.replace(
                 self._original.health,
                 battery_min_percent=self._bat_min.get(),
