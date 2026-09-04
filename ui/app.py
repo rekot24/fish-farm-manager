@@ -6,7 +6,8 @@ Main Tkinter application window.
 Layout:
   - Top bar: Start All / Stop All / Add Devices / Settings buttons
   - Device list: scrollable panel of DevicePanel rows
-  - Log panel: scrolled text with filter
+  - Debug Panel: scrolled text with filter; hidden when neither
+    settings.debug.enabled nor settings.logging.log_to_console is on
 
 Workers never touch Tkinter directly.
 All UI updates happen via root.after() polling at 500ms intervals.
@@ -73,6 +74,7 @@ class App:
         # Start polling loops
         self._poll_status()
         self._drain_log_queue()
+        self._apply_debug_panel_visibility()
 
         # Clean shutdown on window close
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -132,17 +134,17 @@ class App:
             padding=(12, 20),
         )
 
-        # ---- Log panel ----
-        log_frame = ttk.LabelFrame(self.root, text="Log", padding=(8, 6))
-        log_frame.grid(row=2, column=0, sticky="ew", padx=10, pady=(0, 10))
-        log_frame.columnconfigure(0, weight=1)
+        # ---- Debug panel ----
+        self._debug_frame = ttk.LabelFrame(self.root, text="Debug Panel", padding=(8, 6))
+        self._debug_frame.grid(row=2, column=0, sticky="ew", padx=10, pady=(0, 10))
+        self._debug_frame.columnconfigure(0, weight=1)
 
         self._log_text = scrolledtext.ScrolledText(
-            log_frame, height=10, wrap="word", state="disabled"
+            self._debug_frame, height=10, wrap="word", state="disabled"
         )
         self._log_text.grid(row=0, column=0, columnspan=3, sticky="ew")
 
-        filter_frame = ttk.Frame(log_frame)
+        filter_frame = ttk.Frame(self._debug_frame)
         filter_frame.grid(row=1, column=0, sticky="w", pady=(4, 0))
         ttk.Label(filter_frame, text="Filter:").pack(side="left")
         self._log_filter = tk.StringVar()
@@ -188,8 +190,32 @@ class App:
         device_count = len(self._device_panels)
         capped = min(device_count, self.MAX_VISIBLE_DEVICES_FOR_RESIZE)
         panel_height = capped * self.DEVICE_PANEL_HEIGHT_PX
-        total = panel_height + self.LOG_PANEL_HEIGHT_PX + self.TOP_BAR_HEIGHT_PX
+
+        # Only include debug panel height if it's visible
+        settings = load_settings()
+        debug_visible = settings.debug.enabled or settings.logging.log_to_console
+        debug_height = self.LOG_PANEL_HEIGHT_PX if debug_visible else 0
+
+        total = panel_height + debug_height + self.TOP_BAR_HEIGHT_PX
         self.root.geometry(f"820x{total}")
+
+    def _apply_debug_panel_visibility(self) -> None:
+        """
+        Show or hide the Debug Panel based on settings.
+
+        Visible whenever settings.debug.enabled (opt-in debug categories) or
+        settings.logging.log_to_console (Layer 7's always-on log output routed
+        to a visible surface) is True — either one is sufficient reason to show
+        it. Hidden only when both are off, since at that point the panel would
+        just be reserving window space for output nobody asked to see; the
+        full record still exists in logs/app.log and logs/errors.log either way.
+        """
+        settings = load_settings()
+        if settings.debug.enabled or settings.logging.log_to_console:
+            self._debug_frame.grid(row=2, column=0, sticky="ew", padx=10, pady=(0, 10))
+        else:
+            self._debug_frame.grid_remove()
+        self._resize_to_fit()
 
     # ------------------------------------------------------------------
     # Polling
@@ -312,6 +338,7 @@ class App:
         if dialog.saved:
             save_settings(dialog.result)
             self.manager.reload_settings(dialog.result)
+            self._apply_debug_panel_visibility()
             self.log("[UI] Global settings saved")
 
     def _open_device_settings(self, serial: str) -> None:
