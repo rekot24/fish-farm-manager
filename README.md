@@ -1,4 +1,4 @@
-# Be Fish Farm Manager
+# Fish Farm Manager
 
 A background device-farm manager for the Roblox game **Be Fish**. Runs on a Windows PC with a bank of Android phones/tablets connected over USB via an ADB hub. Each device gets its own worker thread that captures its screen, detects what's on it via image template matching (no OCR), and drives it through ADB taps — auto-farming, resetting timers, recovering from crashes, and keeping the device out of trouble (battery, heat, dropped ADB) — indefinitely and unattended.
 

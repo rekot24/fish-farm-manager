@@ -895,7 +895,7 @@ or `FarmEventBus`.
 
 ```
 ┌──────────────────────────────────────────────────────┐
-│  Be Fish Farm Manager                 [─] [□] [✕]    │
+│  Fish Farm Manager                 [─] [□] [✕]    │
 ├──────────────────────────────────────────────────────┤
 │  [Start All]  [Stop All]  [Settings]                  │
 ├──────────────────────────────────────────────────────┤
@@ -1060,5 +1060,5 @@ lead device is offline. No code changes needed to switch servers.
 
 ---
 
-*End of Plan — Be Fish Farm Manager v1*  
+*End of Plan — Fish Farm Manager v1*  
 *Status: Final — All decisions made, ready to begin Phase 1 implementation*

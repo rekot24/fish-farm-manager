@@ -1,4 +1,4 @@
-# Standards Audit — Be Fish Farm Manager
+# Standards Audit — Fish Farm Manager
 
 Audited against [`app-framework.md`](https://github.com/Rekot24/dev-standards/blob/main/app-framework.md) (dev-standards repo, updated Sept 2026).
 

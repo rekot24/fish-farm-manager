@@ -1,7 +1,7 @@
 """
 main.py
 
-Be Fish Farm Manager — entry point.
+Fish Farm Manager — entry point.
 
 Starts the core (DeviceManager) and the Tkinter UI.
 The core runs regardless of UI visibility.

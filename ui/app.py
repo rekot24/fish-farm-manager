@@ -50,7 +50,7 @@ class App:
     def __init__(self, root: tk.Tk, manager: DeviceManager, startup_warnings: List[str] = None):
         self.root = root
         self.manager = manager
-        self.root.title("Be Fish Farm Manager")
+        self.root.title("Fish Farm Manager")
         self.root.geometry("820x680")
         self.root.minsize(640, 480)
 
@@ -90,7 +90,7 @@ class App:
         top = ttk.Frame(self.root, padding=(10, 8))
         top.grid(row=0, column=0, sticky="ew")
 
-        ttk.Label(top, text="Be Fish Farm Manager",
+        ttk.Label(top, text="Fish Farm Manager",
                   font=("TkDefaultFont", 12, "bold")).pack(side="left")
 
         ttk.Button(top, text="Settings",
