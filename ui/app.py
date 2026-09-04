@@ -6,8 +6,8 @@ Main Tkinter application window.
 Layout:
   - Top bar: Start All / Stop All / Add Devices / Settings buttons
   - Device list: scrollable panel of DevicePanel rows
-  - Debug Panel: scrolled text with filter; hidden when neither
-    settings.debug.enabled nor settings.logging.log_to_console is on
+  - Debug Panel: scrolled text with filter; hidden unless settings.debug.enabled
+    or (settings.logging.enabled and settings.logging.log_to_console) is on
 
 Workers never touch Tkinter directly.
 All UI updates happen via root.after() polling at 500ms intervals.
@@ -192,26 +192,32 @@ class App:
         panel_height = capped * self.DEVICE_PANEL_HEIGHT_PX
 
         # Only include debug panel height if it's visible
-        settings = load_settings()
-        debug_visible = settings.debug.enabled or settings.logging.log_to_console
-        debug_height = self.LOG_PANEL_HEIGHT_PX if debug_visible else 0
+        debug_height = self.LOG_PANEL_HEIGHT_PX if self._debug_panel_should_be_visible() else 0
 
         total = panel_height + debug_height + self.TOP_BAR_HEIGHT_PX
         self.root.geometry(f"820x{total}")
 
-    def _apply_debug_panel_visibility(self) -> None:
+    def _debug_panel_should_be_visible(self) -> bool:
         """
-        Show or hide the Debug Panel based on settings.
+        Whether the Debug Panel should currently be shown, per settings.
 
-        Visible whenever settings.debug.enabled (opt-in debug categories) or
-        settings.logging.log_to_console (Layer 7's always-on log output routed
-        to a visible surface) is True — either one is sufficient reason to show
-        it. Hidden only when both are off, since at that point the panel would
-        just be reserving window space for output nobody asked to see; the
-        full record still exists in logs/app.log and logs/errors.log either way.
+        Visible whenever settings.debug.enabled (opt-in debug categories) is
+        True, OR whenever logging is actually reaching a console
+        (settings.logging.enabled AND settings.logging.log_to_console) —
+        mirrors bot/app_logger.configure()'s own gate for the real console
+        handler ("if cfg.enabled and cfg.log_to_console"), so unchecking the
+        Logging tab's master "Enabled" switch hides the panel too, not just
+        unchecking "Log to Console" on its own. Hidden only when neither
+        condition holds; the full record still exists in logs/app.log and
+        logs/errors.log regardless of panel visibility.
         """
         settings = load_settings()
-        if settings.debug.enabled or settings.logging.log_to_console:
+        lg = settings.logging
+        return settings.debug.enabled or (lg.enabled and lg.log_to_console)
+
+    def _apply_debug_panel_visibility(self) -> None:
+        """Show or hide the Debug Panel based on settings (see _debug_panel_should_be_visible)."""
+        if self._debug_panel_should_be_visible():
             self._debug_frame.grid(row=2, column=0, sticky="ew", padx=10, pady=(0, 10))
         else:
             self._debug_frame.grid_remove()
