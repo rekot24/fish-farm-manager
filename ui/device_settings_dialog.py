@@ -45,6 +45,7 @@ class DeviceSettingsDialog:
         self.result: DeviceConfig = device_cfg
         self.all_devices = all_devices
         self.saved = False
+        self.deleted = False
 
         self.top = tk.Toplevel(parent)
         self.top.title(f"Device Settings — {device_cfg.nickname or device_cfg.serial}")
@@ -194,6 +195,11 @@ class DeviceSettingsDialog:
         tools_row = ttk.Frame(parent)
         tools_row.pack(anchor="w", pady=4)
         ttk.Button(tools_row, text="Open Detector Tool", command=self._open_capture_tool).pack(side="left")
+
+        ttk.Separator(parent, orient="horizontal").pack(fill="x", pady=(10, 4))
+        ttk.Label(parent, text="Danger Zone", font=("TkDefaultFont", 9, "bold"),
+                  foreground="#cc0000").pack(anchor="w")
+        ttk.Button(parent, text="Remove This Device...", command=self._remove_device).pack(anchor="w", pady=4)
 
     def _build_timers_tab(self, parent: ttk.Frame) -> None:
         f = ttk.Frame(parent)
@@ -430,6 +436,23 @@ class DeviceSettingsDialog:
 
         self.result = self._build_result()
         self.saved = True
+        self.top.destroy()
+
+    def _remove_device(self) -> None:
+        """
+        Confirm and flag this device for removal. Does NOT perform the actual
+        deletion (stopping the worker, deleting assets, rewriting devices.json)
+        here — app.py does that, the same handoff pattern as self.saved.
+        """
+        name = self.result.nickname or self.result.serial
+        if not messagebox.askyesno(
+            "Remove Device",
+            f"This will permanently remove {name} and delete all its captured "
+            f"detector images. This cannot be undone. Are you sure?",
+            parent=self.top,
+        ):
+            return
+        self.deleted = True
         self.top.destroy()
 
     def _open_capture_tool(self) -> None:

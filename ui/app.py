@@ -16,13 +16,16 @@ All config writes go through config.settings/config.devices save functions.
 from __future__ import annotations
 
 import queue
+import shutil
 import threading
 import tkinter as tk
+from pathlib import Path
 from tkinter import ttk, scrolledtext
 from typing import List, Optional
 
 from bot import app_logger
 from bot.device_manager import DeviceManager
+from config.paths import project_root
 from config.settings import load_settings, save_settings
 from config.devices import load_devices, save_devices
 from ui.device_panel import DevicePanel
@@ -327,6 +330,27 @@ class App:
             self.manager.reload_device_configs(updated)
             self._rebuild_device_panels()
             self.log(f"[UI] Device settings saved for {dev_cfg.nickname or serial}")
+        elif dialog.deleted:
+            self._remove_device(serial)
+
+    def _remove_device(self, serial: str) -> None:
+        """
+        Permanently remove a device: stop its worker, delete its captured
+        detector images, drop it from devices.json, and refresh the UI.
+        Called after the Device Settings dialog's Danger Zone confirmation
+        (dialog.deleted) — the dialog itself never performs the deletion.
+        """
+        self.manager.stop_device(serial)
+
+        assets_dir = project_root() / "assets" / "devices" / serial
+        shutil.rmtree(assets_dir, ignore_errors=True)
+
+        devices = load_devices()
+        filtered = [d for d in devices if d.serial != serial]
+        save_devices(filtered)
+        self.manager.reload_device_configs(filtered)
+        self._rebuild_device_panels()
+        self.log(f"[UI] Removed device {serial} and deleted its assets")
 
     # ------------------------------------------------------------------
     # Scrollable device list helpers
